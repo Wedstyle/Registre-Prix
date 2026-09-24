@@ -3,20 +3,22 @@
 // === CONFIGURATION SUPABASE ===
 const SUPABASE_URL = "https://snrwlsrqomysfyvuayfm.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_H1Zv0Sk1H_ITiT3E1RTfxQ_EKrne7_D";
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+);
 
 let panier = [];
 let prixOverrides = {};
 let editMode = false;
-let realtimeChannel = null;
 
 // === CHARGEMENT DES OVERRIDES ===
 async function chargerOverrides() {
   try {
-    const { data, error } = await supabase.from("prix_overrides").select("*");
-
+    const { data, error } = await supabaseClient
+      .from("prix_overrides")
+      .select("*");
     if (error) throw error;
-
     prixOverrides = {};
     data.forEach((row) => {
       const key = `${row.categorie}:${row.item_index}:${row.champ}`;
@@ -24,7 +26,7 @@ async function chargerOverrides() {
     });
     appliquerOverrides();
   } catch (e) {
-    console.error("⚠️ Erreur de chargement des prix :", e);
+    console.error("⚠️ Erreur chargement prix :", e);
   }
 }
 
@@ -39,12 +41,12 @@ function appliquerOverrides() {
   });
 }
 
-// === SAUVEGARDE D'UN OVERRIDE ===
+// === SAUVEGARDE ===
 async function sauvegarderOverride(cat, index, field, value) {
   const key = `${cat}:${index}:${field}`;
   prixOverrides[key] = value;
 
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from("prix_overrides")
     .upsert(
       {
@@ -57,14 +59,14 @@ async function sauvegarderOverride(cat, index, field, value) {
     );
 
   if (error) {
-    console.error("❌ Erreur de sauvegarde :", error);
-    alert("⚠️ La sauvegarde a échoué. Vérifiez la console.");
+    console.error("❌ Erreur sauvegarde :", error);
+    alert("⚠️ Sauvegarde échouée. Vérifiez la console (F12).");
   } else {
     console.log(`✅ Prix sauvegardé : ${key} = ${value}`);
   }
 }
 
-// === RÉINITIALISATION TOTALE ===
+// === RÉINITIALISATION ===
 async function resetOverrides() {
   if (
     !confirm(
@@ -72,11 +74,12 @@ async function resetOverrides() {
     )
   )
     return;
-
-  const { error } = await supabase.from("prix_overrides").delete().neq("id", 0);
-
+  const { error } = await supabaseClient
+    .from("prix_overrides")
+    .delete()
+    .neq("id", 0);
   if (error) {
-    alert("⚠️ Impossible de réinitialiser. Vérifiez la console.");
+    alert("⚠️ Impossible de réinitialiser.");
     console.error(error);
   } else {
     location.reload();
@@ -85,21 +88,17 @@ async function resetOverrides() {
 
 // === ÉCOUTE TEMPS RÉEL ===
 function ecouterChangementsTempsReel() {
-  realtimeChannel = supabase
+  supabaseClient
     .channel("prix-realtime")
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "prix_overrides" },
       (payload) => {
-        console.log("🔄 Changement détecté :", payload);
+        console.log("🔄 Changement détecté en temps réel");
         chargerOverrides().then(() => {
-          // Re-render des sections actives pour refléter les nouveaux prix
-          document.querySelectorAll(".section-content").forEach((s) => {
-            if (s.classList.contains("active")) {
-              const cat = s.id;
-              reRenderSection(cat);
-            }
-          });
+          document
+            .querySelectorAll(".section-content.active")
+            .forEach((s) => reRenderSection(s.id));
         });
       },
     )
@@ -111,16 +110,13 @@ function reRenderSection(cat) {
   if (!section) return;
   const data = registreData[cat];
   if (!data) return;
-
   const tbody = section.querySelector("tbody");
   if (!tbody) return;
-
   const rows = tbody.querySelectorAll("tr");
   data.items.forEach((item, idx) => {
     const row = rows[idx];
     if (!row) return;
-    const cells = row.querySelectorAll("[data-price-cell]");
-    cells.forEach((cell) => {
+    row.querySelectorAll("[data-price-cell]").forEach((cell) => {
       const field = cell.dataset.field;
       if (item[field] !== undefined) {
         cell.textContent = item[field];
@@ -142,7 +138,6 @@ function toggleEditMode() {
       : "✏️ Modifier les prix";
     btn.classList.toggle("active", editMode);
   }
-
   const resetBtn = document.getElementById("resetPrix");
   if (resetBtn) resetBtn.style.display = editMode ? "inline-flex" : "none";
 
@@ -155,7 +150,6 @@ function toggleEditMode() {
 function setupEditToolbar() {
   const btn = document.getElementById("editToggle");
   if (btn) btn.addEventListener("click", toggleEditMode);
-
   const resetBtn = document.getElementById("resetPrix");
   if (resetBtn) resetBtn.addEventListener("click", resetOverrides);
 
@@ -177,13 +171,10 @@ function setupEditToolbar() {
     }
     cell.dataset.prix = newValue;
 
-    // Mise à jour du panier si l'article y est
-    const nomArticle =
-      cell.dataset.nom || registreData[cat]?.items?.[index]?.nom || "";
+    const nomArticle = cell.dataset.nom || "";
     const materiau = cell.dataset.materiau || "";
     const nomComplet = materiau ? `${nomArticle} (${materiau})` : nomArticle;
     const prixExtrait = extrairePrix(newValue);
-
     panier.forEach((p) => {
       if (p.nom === nomComplet && prixExtrait > 0) p.prixUnitaire = prixExtrait;
     });
@@ -207,7 +198,7 @@ function setupEditToolbar() {
   });
 }
 
-// === INITIALISATION ===
+// === INIT ===
 document.addEventListener("DOMContentLoaded", async () => {
   await chargerOverrides();
   renderTabs();
@@ -229,7 +220,6 @@ function renderTabs() {
     btn.className = "tab-btn";
     btn.textContent = registreData[key].title;
     btn.dataset.target = key;
-
     btn.addEventListener("click", () => {
       document.getElementById("searchInput").value = "";
       resetVisibility();
@@ -348,7 +338,6 @@ function renderAllSections() {
           ajouterAuPanier(item.nom, registreData[key].items[index].prix, "");
         });
       }
-
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
@@ -361,11 +350,8 @@ function renderAllSections() {
 function creerCellulePrix(nomArticle, materiau, valeurPrix, cat, index, field) {
   const estInvalide = !valeurPrix || valeurPrix === "X" || valeurPrix === "-";
   const dataAttrs = `data-price-cell data-cat="${cat}" data-index="${index}" data-field="${field}" data-nom="${nomArticle}" data-materiau="${materiau}"`;
-
-  if (estInvalide) {
+  if (estInvalide)
     return `<td class="price cell-vide" ${dataAttrs}>${valeurPrix || "-"}</td>`;
-  }
-
   const valeurSafe = String(valeurPrix).replace(/"/g, "&quot;");
   return `<td class="price cell-clickable" ${dataAttrs} data-prix="${valeurSafe}">${valeurPrix}</td>`;
 }
@@ -377,7 +363,6 @@ document.addEventListener("click", (e) => {
     const materiau = e.target.dataset.materiau;
     const prixTexte = e.target.dataset.prix;
     ajouterAuPanier(nom, prixTexte, materiau);
-
     e.target.style.backgroundColor = "rgba(245, 158, 11, 0.3)";
     setTimeout(() => {
       e.target.style.backgroundColor = "";
@@ -405,7 +390,6 @@ function setupSearch() {
     document
       .querySelectorAll(".section-content")
       .forEach((s) => s.classList.remove("active"));
-
     document.querySelectorAll(".section-content").forEach((section) => {
       let hasResults = false;
       section.querySelectorAll("tbody tr").forEach((row) => {
@@ -451,7 +435,7 @@ function extrairePrix(prixTexte) {
 function ajouterAuPanier(nom, prixTexte, details = "") {
   const prix = extrairePrix(prixTexte);
   if (prix === 0) {
-    alert("Impossible d'ajouter cet article : prix invalide.");
+    alert("Prix invalide.");
     return;
   }
   const nomComplet = details ? `${nom} (${details})` : nom;
@@ -472,8 +456,8 @@ function mettreAJourPanierUI() {
   const badge = document.getElementById("panier-count-badge");
 
   list.innerHTML = "";
-  let total = 0;
-  let count = 0;
+  let total = 0,
+    count = 0;
 
   if (panier.length === 0) {
     const li = document.createElement("li");
@@ -485,7 +469,6 @@ function mettreAJourPanierUI() {
       const sousTotal = item.prixUnitaire * item.quantite;
       total += sousTotal;
       count += item.quantite;
-
       const li = document.createElement("li");
       li.innerHTML = `
                 <div class="item-info">
