@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Registre des Marchandises - JDR</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css?v=999" />
+  </head>
+  <body>
+    <header>
+      <h1>📜 Registre des Marchandises 📜</h1>
+      <div class="search-container">
+        <input
+          type="text"
+          id="searchInput"
+          placeholder="Rechercher un article (ex: épée, tarte, cuir...)"
+        />
+      </div>
+
+      <!-- Barre d'outils : édition des prix -->
+      <div class="toolbar">
+        <button id="editToggle" class="btn-toolbar">
+          ✏️ Modifier les prix
+        </button>
+        <button
+          id="resetPrix"
+          class="btn-toolbar btn-danger"
+          style="display: none"
+        >
+          🔄 Réinitialiser
+        </button>
+      </div>
+    </header>
+
+    <!-- Structure : contenu + panier côte à côte -->
+    <div class="layout">
+      <!-- Colonne de gauche : le catalogue -->
+      <div class="content-col">
+        <div class="tabs" id="tabsContainer"></div>
+        <main id="mainContent"></main>
+        <footer>— Scellé & certifié par la Guilde des Marchands —</footer>
+      </div>
+
+      <!-- Colonne de droite : le panier toujours visible -->
+      <aside class="cart-col">
+        <div class="panier-panel">
+          <div class="panier-header">
+            <h3>🛒 Votre Panier</h3>
+            <span id="panier-count-badge" class="badge">0</span>
+          </div>
+          <ul id="panier-list">
+            <li class="panier-vide">Le panier est vide.</li>
+          </ul>
+          <div class="panier-footer">
+            <div class="panier-total">
+              <span>Total :</span>
+              <span><span id="panier-total">0</span> Septims</span>
+            </div>
+            <button id="viderPanier" class="btn-vider">Vider le panier</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>
