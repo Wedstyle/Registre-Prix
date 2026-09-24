@@ -1,19 +1,31 @@
 // --- LOGIQUE JAVASCRIPT ---
 
-let panier = [];
+// === CONFIGURATION SUPABASE ===
+const SUPABASE_URL = "https://snrwlsrqomysfyvuayfm.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_H1Zv0Sk1H_ITiT3E1RTfxQ_EKrne7_D";
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// === SYSTÈME D'ÉDITION DES PRIX ===
-const STORAGE_KEY = "registre_prix_overrides";
+let panier = [];
 let prixOverrides = {};
 let editMode = false;
+let realtimeChannel = null;
 
-function chargerOverrides() {
+// === CHARGEMENT DES OVERRIDES ===
+async function chargerOverrides() {
   try {
-    prixOverrides = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-  } catch (e) {
+    const { data, error } = await supabase.from("prix_overrides").select("*");
+
+    if (error) throw error;
+
     prixOverrides = {};
+    data.forEach((row) => {
+      const key = `${row.categorie}:${row.item_index}:${row.champ}`;
+      prixOverrides[key] = row.valeur;
+    });
+    appliquerOverrides();
+  } catch (e) {
+    console.error("⚠️ Erreur de chargement des prix :", e);
   }
-  appliquerOverrides();
 }
 
 function appliquerOverrides() {
@@ -27,28 +39,98 @@ function appliquerOverrides() {
   });
 }
 
-function sauvegarderOverride(cat, index, field, value) {
+// === SAUVEGARDE D'UN OVERRIDE ===
+async function sauvegarderOverride(cat, index, field, value) {
   const key = `${cat}:${index}:${field}`;
   prixOverrides[key] = value;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(prixOverrides));
-  } catch (e) {
-    console.warn("Impossible de sauvegarder:", e);
+
+  const { error } = await supabase
+    .from("prix_overrides")
+    .upsert(
+      {
+        categorie: cat,
+        item_index: index,
+        champ: field,
+        valeur: String(value),
+      },
+      { onConflict: "categorie,item_index,champ" },
+    );
+
+  if (error) {
+    console.error("❌ Erreur de sauvegarde :", error);
+    alert("⚠️ La sauvegarde a échoué. Vérifiez la console.");
+  } else {
+    console.log(`✅ Prix sauvegardé : ${key} = ${value}`);
   }
 }
 
-function resetOverrides() {
+// === RÉINITIALISATION TOTALE ===
+async function resetOverrides() {
   if (
     !confirm(
-      "Réinitialiser tous les prix aux valeurs d'origine ? Cette action est irréversible.",
+      "Réinitialiser TOUS les prix pour TOUT LE MONDE ? Action irréversible.",
     )
   )
     return;
-  prixOverrides = {};
-  localStorage.removeItem(STORAGE_KEY);
-  location.reload();
+
+  const { error } = await supabase.from("prix_overrides").delete().neq("id", 0);
+
+  if (error) {
+    alert("⚠️ Impossible de réinitialiser. Vérifiez la console.");
+    console.error(error);
+  } else {
+    location.reload();
+  }
 }
 
+// === ÉCOUTE TEMPS RÉEL ===
+function ecouterChangementsTempsReel() {
+  realtimeChannel = supabase
+    .channel("prix-realtime")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "prix_overrides" },
+      (payload) => {
+        console.log("🔄 Changement détecté :", payload);
+        chargerOverrides().then(() => {
+          // Re-render des sections actives pour refléter les nouveaux prix
+          document.querySelectorAll(".section-content").forEach((s) => {
+            if (s.classList.contains("active")) {
+              const cat = s.id;
+              reRenderSection(cat);
+            }
+          });
+        });
+      },
+    )
+    .subscribe();
+}
+
+function reRenderSection(cat) {
+  const section = document.getElementById(cat);
+  if (!section) return;
+  const data = registreData[cat];
+  if (!data) return;
+
+  const tbody = section.querySelector("tbody");
+  if (!tbody) return;
+
+  const rows = tbody.querySelectorAll("tr");
+  data.items.forEach((item, idx) => {
+    const row = rows[idx];
+    if (!row) return;
+    const cells = row.querySelectorAll("[data-price-cell]");
+    cells.forEach((cell) => {
+      const field = cell.dataset.field;
+      if (item[field] !== undefined) {
+        cell.textContent = item[field];
+        cell.dataset.prix = item[field];
+      }
+    });
+  });
+}
+
+// === MODE ÉDITION ===
 function toggleEditMode() {
   editMode = !editMode;
   document.body.classList.toggle("edit-mode", editMode);
@@ -77,8 +159,7 @@ function setupEditToolbar() {
   const resetBtn = document.getElementById("resetPrix");
   if (resetBtn) resetBtn.addEventListener("click", resetOverrides);
 
-  // Sauvegarde à la perte de focus
-  document.addEventListener("focusout", (e) => {
+  document.addEventListener("focusout", async (e) => {
     const cell = e.target;
     if (!cell.hasAttribute || !cell.hasAttribute("data-price-cell")) return;
     if (!editMode) return;
@@ -89,20 +170,19 @@ function setupEditToolbar() {
     let newValue = (cell.textContent || "").replace(/\s+/g, " ").trim();
     if (!newValue) newValue = "-";
 
-    sauvegarderOverride(cat, index, field, newValue);
+    await sauvegarderOverride(cat, index, field, newValue);
 
     if (registreData[cat]?.items?.[index]) {
       registreData[cat].items[index][field] = newValue;
     }
-
-    const prixExtrait = extrairePrix(newValue);
     cell.dataset.prix = newValue;
 
-    // Mise à jour du panier si présent
+    // Mise à jour du panier si l'article y est
     const nomArticle =
       cell.dataset.nom || registreData[cat]?.items?.[index]?.nom || "";
     const materiau = cell.dataset.materiau || "";
     const nomComplet = materiau ? `${nomArticle} (${materiau})` : nomArticle;
+    const prixExtrait = extrairePrix(newValue);
 
     panier.forEach((p) => {
       if (p.nom === nomComplet && prixExtrait > 0) p.prixUnitaire = prixExtrait;
@@ -113,7 +193,6 @@ function setupEditToolbar() {
     setTimeout(() => cell.classList.remove("saved-flash"), 600);
   });
 
-  // Entrée = valider
   document.addEventListener("keydown", (e) => {
     if (
       e.target.hasAttribute &&
@@ -128,21 +207,21 @@ function setupEditToolbar() {
   });
 }
 
-// === FIN SYSTÈME ÉDITION ===
-
-document.addEventListener("DOMContentLoaded", () => {
-  chargerOverrides();
+// === INITIALISATION ===
+document.addEventListener("DOMContentLoaded", async () => {
+  await chargerOverrides();
   renderTabs();
   renderAllSections();
   setupSearch();
   setupPanier();
   setupEditToolbar();
+  ecouterChangementsTempsReel();
 
   const firstTab = document.querySelector(".tab-btn");
   if (firstTab) firstTab.click();
 });
 
-// 1. Onglets
+// === ONGLETS ===
 function renderTabs() {
   const tabsContainer = document.getElementById("tabsContainer");
   Object.keys(registreData).forEach((key) => {
@@ -167,7 +246,7 @@ function renderTabs() {
   });
 }
 
-// 2. Sections
+// === SECTIONS ===
 function renderAllSections() {
   const mainContent = document.getElementById("mainContent");
   const listCategories = [
@@ -291,7 +370,6 @@ function creerCellulePrix(nomArticle, materiau, valeurPrix, cat, index, field) {
   return `<td class="price cell-clickable" ${dataAttrs} data-prix="${valeurSafe}">${valeurPrix}</td>`;
 }
 
-// Clic sur les cellules de prix (armes/armures)
 document.addEventListener("click", (e) => {
   if (editMode) return;
   if (e.target.classList.contains("cell-clickable")) {
@@ -307,7 +385,7 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// 3. Recherche
+// === RECHERCHE ===
 function setupSearch() {
   const searchInput = document.getElementById("searchInput");
   searchInput.addEventListener("input", (e) => {
@@ -353,7 +431,7 @@ function resetVisibility() {
     .forEach((s) => s.classList.remove("active"));
 }
 
-// 4. Panier
+// === PANIER ===
 function setupPanier() {
   document.getElementById("viderPanier").addEventListener("click", () => {
     panier = [];
