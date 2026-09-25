@@ -46,17 +46,15 @@ async function sauvegarderOverride(cat, index, field, value) {
   const key = `${cat}:${index}:${field}`;
   prixOverrides[key] = value;
 
-  const { error } = await supabaseClient
-    .from("prix_overrides")
-    .upsert(
-      {
-        categorie: cat,
-        item_index: index,
-        champ: field,
-        valeur: String(value),
-      },
-      { onConflict: "categorie,item_index,champ" },
-    );
+  const { error } = await supabaseClient.from("prix_overrides").upsert(
+    {
+      categorie: cat,
+      item_index: index,
+      champ: field,
+      valeur: String(value),
+    },
+    { onConflict: "categorie,item_index,champ" },
+  );
 
   if (error) {
     console.error("❌ Erreur sauvegarde :", error);
@@ -496,7 +494,6 @@ function mettreAJourPanierUI() {
 
 // === CODE SECRET POUR RÉVÉLER LE MODE ÉDITION ===
 (function () {
-  // Code encodé en base64 (décode en "9321")
   const CODE_SECRET = atob("OTMyMQ==");
 
   let buffer = "";
