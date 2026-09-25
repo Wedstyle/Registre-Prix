@@ -46,15 +46,17 @@ async function sauvegarderOverride(cat, index, field, value) {
   const key = `${cat}:${index}:${field}`;
   prixOverrides[key] = value;
 
-  const { error } = await supabaseClient.from("prix_overrides").upsert(
-    {
-      categorie: cat,
-      item_index: index,
-      champ: field,
-      valeur: String(value),
-    },
-    { onConflict: "categorie,item_index,champ" },
-  );
+  const { error } = await supabaseClient
+    .from("prix_overrides")
+    .upsert(
+      {
+        categorie: cat,
+        item_index: index,
+        champ: field,
+        valeur: String(value),
+      },
+      { onConflict: "categorie,item_index,champ" },
+    );
 
   if (error) {
     console.error("❌ Erreur sauvegarde :", error);
@@ -491,17 +493,18 @@ function mettreAJourPanierUI() {
     });
   });
 }
+
 // === CODE SECRET POUR RÉVÉLER LE MODE ÉDITION ===
 (function () {
-  const CODE_SECRET = "9321";
+  // Code encodé en base64 (décode en "9321")
+  const CODE_SECRET = atob("OTMyMQ==");
+
   let buffer = "";
   let timeoutId = null;
 
   document.addEventListener("keydown", (e) => {
-    // Ignore les touches spéciales (Ctrl, Alt, etc.)
     if (e.ctrlKey || e.altKey || e.metaKey) return;
 
-    // Ignore si on est en train de taper dans un champ (recherche, édition)
     const tag = document.activeElement?.tagName;
     if (
       tag === "INPUT" ||
@@ -510,23 +513,19 @@ function mettreAJourPanierUI() {
     )
       return;
 
-    // Ajoute le caractère au buffer
     if (e.key.length === 1) {
       buffer += e.key;
     }
 
-    // Garde seulement les 4 derniers caractères
     if (buffer.length > CODE_SECRET.length) {
       buffer = buffer.slice(-CODE_SECRET.length);
     }
 
-    // Vérifie si le code est correct
     if (buffer === CODE_SECRET) {
       buffer = "";
       revelerBoutonEdition();
     }
 
-    // Reset du buffer après 2 secondes d'inactivité
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => {
       buffer = "";
@@ -540,28 +539,22 @@ function mettreAJourPanierUI() {
     if (btn.style.display === "none") {
       btn.style.display = "inline-flex";
       btn.style.animation = "fadeIn 0.4s ease";
-
-      // Petit effet visuel : flash du bouton
       btn.style.transform = "scale(1.1)";
       setTimeout(() => {
         btn.style.transform = "scale(1)";
       }, 300);
-
       console.log("🔓 Mode MJ déverrouillé");
     } else {
-      // Re-cacher si on retape le code
       btn.style.display = "none";
       const resetBtn = document.getElementById("resetPrix");
       if (resetBtn) resetBtn.style.display = "none";
 
-      // Sortir du mode édition si actif
       if (document.body.classList.contains("edit-mode")) {
         document.body.classList.remove("edit-mode");
         document.querySelectorAll("[data-price-cell]").forEach((cell) => {
           cell.contentEditable = "false";
         });
       }
-
       console.log("🔒 Mode MJ verrouillé");
     }
   }
