@@ -471,6 +471,15 @@ function ecouterChangementsTempsReel() {
       () => {
         const cv = document.querySelector(".view.active");
         if (cv && cv.id === "view-dashboard") chargerDashboard();
+        if (
+          cv &&
+          cv.id === "view-admin" &&
+          !document
+            .getElementById("adminComptabilite")
+            .classList.contains("hidden")
+        ) {
+          chargerComptabilite();
+        }
       },
     )
     .on(
@@ -504,7 +513,91 @@ function ecouterChangementsTempsReel() {
         });
       },
     )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "employees" },
+      (payload) => {
+        // Si c'est MOI qui ai été modifié → vérifier mon statut
+        if (
+          payload.new &&
+          utilisateurCourant &&
+          payload.new.id === utilisateurCourant.id
+        ) {
+          gererChangementMonProfil(payload.new);
+        }
+        // Si je suis patron et sur la page admin employés → rafraîchir la liste
+        if (utilisateurCourant?.role === "patron") {
+          const cv = document.querySelector(".view.active");
+          if (
+            cv &&
+            cv.id === "view-admin" &&
+            !document
+              .getElementById("adminEmployes")
+              .classList.contains("hidden")
+          ) {
+            chargerListeEmployes();
+          }
+        }
+      },
+    )
     .subscribe();
+}
+
+async function gererChangementMonProfil(nouveauProfil) {
+  // Cas 1 : j'ai été EXCLU
+  if (nouveauProfil.actif === false) {
+    afficherToast(
+      "🚫 Votre compte a été désactivé. Déconnexion en cours...",
+      "error",
+      5000,
+    );
+    setTimeout(async () => {
+      await supabaseClient.auth.signOut();
+      location.reload();
+    }, 2500);
+    return;
+  }
+
+  // Cas 2 : j'ai été INVALIDÉ
+  if (nouveauProfil.valide === false && nouveauProfil.role !== "patron") {
+    afficherToast(
+      "⏸️ Votre compte a été invalidé. Retour en attente...",
+      "error",
+      5000,
+    );
+    utilisateurCourant = nouveauProfil;
+    setTimeout(() => {
+      mettreAJourUIUtilisateur(utilisateurCourant);
+      afficherVue("attente");
+    }, 1500);
+    return;
+  }
+
+  // Cas 3 : mon rôle a changé (promotion/rétrogradation)
+  if (utilisateurCourant && nouveauProfil.role !== utilisateurCourant.role) {
+    const ancienRole = utilisateurCourant.role;
+    utilisateurCourant = nouveauProfil;
+    mettreAJourUIUtilisateur(utilisateurCourant);
+
+    if (nouveauProfil.role === "patron" && ancienRole === "employe") {
+      afficherToast("🎉 Vous êtes maintenant Patron !", "success", 4000);
+    } else if (ancienRole === "patron" && nouveauProfil.role === "employe") {
+      afficherToast("⬇️ Vous êtes redevenu Employé.", "info", 4000);
+    }
+    return;
+  }
+
+  // Cas 4 : ma validation est passée à true
+  if (
+    utilisateurCourant &&
+    nouveauProfil.valide === true &&
+    utilisateurCourant.valide !== true
+  ) {
+    utilisateurCourant = nouveauProfil;
+    mettreAJourUIUtilisateur(utilisateurCourant);
+    afficherToast("✅ Votre compte a été validé !", "success", 4000);
+    afficherVue("catalogue");
+  }
 }
 
 function reRenderSection(cat) {
@@ -635,7 +728,6 @@ async function chargerCategoriesCustom() {
 
 async function chargerArticlesSupprimes() {
   try {
-    // Utilise la VUE PUBLIQUE qui ne contient que les IDs (pas de fuite d'info)
     const { data } = await supabaseClient
       .from("articles_supprimes_ids")
       .select("*");
