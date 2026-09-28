@@ -9,62 +9,328 @@
       rel="stylesheet"
     />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link rel="stylesheet" href="style.css?v=999" />
+    <link rel="stylesheet" href="style.css?v=6000" />
   </head>
   <body>
-    <header>
-      <h1>📜 Registre Des Marchandises📜</h1>
-      <div class="search-container">
-        <input
-          type="text"
-          id="searchInput"
-          placeholder="Rechercher un article (ex: épée, tarte, cuir...)"
-        />
-      </div>
-
-      <div class="toolbar">
-        <button id="editToggle" class="btn-toolbar" style="display: none">
-          ✏️ Modifier les prix
-        </button>
+    <nav class="main-nav">
+      <div class="nav-brand">📜 Registre des Marchandises</div>
+      <div class="nav-links">
+        <button class="nav-btn" data-view="catalogue">🏪 Catalogue</button>
         <button
-          id="resetPrix"
-          class="btn-toolbar btn-danger"
+          class="nav-btn dashboard-only"
+          data-view="dashboard"
           style="display: none"
         >
-          🔄 Réinitialiser
+          📊 Tableau de bord
         </button>
+        <button
+          class="nav-btn admin-only"
+          data-view="admin"
+          style="display: none"
+        >
+          ⚙️ Administration
+        </button>
+        <button class="nav-btn" id="navLoginBtn" data-view="login">
+          👤 Connexion
+        </button>
+        <div id="navUserInfo" class="nav-user" style="display: none"></div>
       </div>
-    </header>
+    </nav>
 
-    <!-- Structure : contenu + panier côte à côte -->
-    <div class="layout">
-      <!-- Colonne de gauche : le catalogue -->
-      <div class="content-col">
-        <div class="tabs" id="tabsContainer"></div>
-        <main id="mainContent"></main>
-        <footer>— Scellé & certifié par la Guilde des Marchands —</footer>
-      </div>
-
-      <!-- Colonne de droite : le panier toujours visible -->
-      <aside class="cart-col">
-        <div class="panier-panel">
-          <div class="panier-header">
-            <h3>🛒 Votre Panier</h3>
-            <span id="panier-count-badge" class="badge">0</span>
+    <section id="view-login" class="view">
+      <div class="page-container page-narrow">
+        <div class="page-card">
+          <h1 class="page-title">👤 Espace Employé</h1>
+          <div class="tabs-switch">
+            <button class="switch-tab active" data-tab="login">
+              Connexion
+            </button>
+            <button class="switch-tab" data-tab="register">
+              Créer un compte
+            </button>
           </div>
-          <ul id="panier-list">
-            <li class="panier-vide">Le panier est vide.</li>
-          </ul>
-          <div class="panier-footer">
-            <div class="panier-total">
-              <span>Total :</span>
-              <span><span id="panier-total">0</span> Septims</span>
+          <form id="loginForm" class="page-form">
+            <div class="form-group">
+              <label for="loginPseudo">Pseudo</label>
+              <input
+                type="text"
+                id="loginPseudo"
+                required
+                placeholder="Votre pseudo"
+              />
             </div>
-            <button id="viderPanier" class="btn-vider">Vider le panier</button>
-          </div>
+            <div class="form-group">
+              <label for="loginPassword">Mot de passe</label>
+              <input
+                type="password"
+                id="loginPassword"
+                required
+                placeholder="Votre mot de passe"
+              />
+            </div>
+            <div class="form-error" id="loginError"></div>
+            <button type="submit" class="btn-primary btn-full">
+              Se connecter
+            </button>
+          </form>
+          <form id="registerForm" class="page-form hidden">
+            <div class="form-group">
+              <label for="registerPseudo">Pseudo unique</label>
+              <input
+                type="text"
+                id="registerPseudo"
+                required
+                placeholder="Ex: Malakar"
+                pattern="[A-Za-z0-9_-]{3,20}"
+              />
+              <small class="form-hint"
+                >3 à 20 caractères, lettres/chiffres/_/-</small
+              >
+            </div>
+            <div class="form-group">
+              <label for="registerPassword">Mot de passe</label>
+              <input
+                type="password"
+                id="registerPassword"
+                required
+                minlength="6"
+                placeholder="6 caractères minimum"
+              />
+            </div>
+            <div class="form-group">
+              <label for="registerPasswordConfirm">Confirmer</label>
+              <input
+                type="password"
+                id="registerPasswordConfirm"
+                required
+                minlength="6"
+                placeholder="Répéter"
+              />
+            </div>
+            <div class="form-error" id="registerError"></div>
+            <button type="submit" class="btn-primary btn-full">
+              Créer mon compte
+            </button>
+          </form>
         </div>
-      </aside>
-    </div>
+      </div>
+    </section>
+
+    <section id="view-attente" class="view">
+      <div class="page-container page-narrow">
+        <div class="page-card attente-card">
+          <div class="attente-icon">⏳</div>
+          <h1 class="page-title">Compte en attente</h1>
+          <p>Votre compte a bien été créé.</p>
+          <p>
+            Un <strong>Patron</strong> doit valider votre compte avant que vous
+            puissiez accéder au registre.
+          </p>
+          <p class="attente-note">
+            Veuillez patienter, ou contactez votre patron.
+          </p>
+          <button class="btn-secondary" onclick="deconnexion()">
+            Se déconnecter
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-catalogue" class="view">
+      <div class="page-container">
+        <header class="page-header">
+          <h1 class="page-title-big">📜 Registre des Marchandises 📜</h1>
+          <div class="search-container">
+            <input
+              type="text"
+              id="searchInput"
+              placeholder="Rechercher un article..."
+            />
+          </div>
+          <div class="toolbar">
+            <button id="editToggle" class="btn-toolbar" style="display: none">
+              ✏️ Modifier les prix
+            </button>
+            <button
+              id="resetPrix"
+              class="btn-toolbar btn-danger"
+              style="display: none"
+            >
+              🔄 Réinitialiser
+            </button>
+          </div>
+        </header>
+        <div class="layout">
+          <div class="content-col">
+            <div class="tabs" id="tabsContainer"></div>
+            <main id="mainContent"></main>
+            <footer>— Scellé & certifié par la Guilde des Marchands —</footer>
+          </div>
+          <aside class="cart-col">
+            <div class="panier-panel">
+              <div class="panier-header">
+                <h3>🛒 Votre Panier</h3>
+                <span id="panier-count-badge" class="badge">0</span>
+              </div>
+              <ul id="panier-list">
+                <li class="panier-vide">Le panier est vide.</li>
+              </ul>
+              <div class="panier-footer">
+                <div class="panier-remise">
+                  <label>Remise :</label>
+                  <input
+                    type="number"
+                    id="remiseInput"
+                    min="0"
+                    max="100"
+                    value="0"
+                    step="5"
+                  />
+                  <span>%</span>
+                </div>
+                <div class="panier-total">
+                  <span>Total :</span>
+                  <span>
+                    <span id="panier-total">0</span> Septims
+                    <small
+                      id="panier-remise-info"
+                      style="display: none; color: #22c55e"
+                    ></small>
+                  </span>
+                </div>
+                <button id="validerVente" class="btn-valider-vente">
+                  💾 Valider la vente
+                </button>
+                <button id="viderPanier" class="btn-vider">
+                  Vider le panier
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-dashboard" class="view">
+      <div class="page-container">
+        <header class="page-header">
+          <h1 class="page-title-big">📊 Tableau de bord</h1>
+          <p class="page-subtitle">Vue d'ensemble du magasin en temps réel</p>
+        </header>
+
+        <div id="dashboardContent">Chargement...</div>
+      </div>
+    </section>
+
+    <section id="view-admin" class="view">
+      <div class="page-container">
+        <header class="page-header">
+          <h1 class="page-title-big">⚙️ Administration</h1>
+          <p class="page-subtitle">Employés, stock et comptabilité</p>
+        </header>
+
+        <div class="admin-tabs">
+          <button class="admin-tab active" data-admin-tab="employes">
+            👥 Employés
+          </button>
+          <button class="admin-tab" data-admin-tab="stock">📦 Stock</button>
+          <button class="admin-tab" data-admin-tab="comptabilite">
+            📊 Comptabilité
+          </button>
+        </div>
+
+        <div id="adminEmployes" class="admin-panel">
+          <div id="employesList">Chargement...</div>
+        </div>
+
+        <div id="adminStock" class="admin-panel hidden">
+          <div class="stock-toolbar">
+            <input
+              type="text"
+              id="stockSearch"
+              placeholder="🔍 Rechercher un article..."
+              class="stock-search"
+            />
+            <button id="btnAddArticle" class="btn-toolbar">
+              ➕ Nouvel article
+            </button>
+            <button id="btnAddCategorie" class="btn-toolbar">
+              📁 Nouvelle catégorie
+            </button>
+            <button id="stockSaveAll" class="btn-primary">
+              💾 Tout sauvegarder
+            </button>
+          </div>
+
+          <div id="newArticleForm" class="new-article-form hidden">
+            <h3>Créer un nouvel article</h3>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Catégorie</label>
+                <select id="newArticleCat"></select>
+              </div>
+              <div class="form-group">
+                <label>Nom de l'article</label>
+                <input
+                  type="text"
+                  id="newArticleNom"
+                  placeholder="Ex: Épée en argent"
+                />
+              </div>
+              <div class="form-group">
+                <label>Prix (Septims)</label>
+                <input
+                  type="number"
+                  id="newArticlePrix"
+                  min="0"
+                  placeholder="Ex: 150"
+                />
+              </div>
+              <div class="form-group">
+                <label>Stock initial</label>
+                <input type="number" id="newArticleStock" min="0" value="0" />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button id="cancelNewArticle" class="btn-secondary">
+                Annuler
+              </button>
+              <button id="confirmNewArticle" class="btn-primary">
+                Créer l'article
+              </button>
+            </div>
+          </div>
+
+          <div id="newCategoryForm" class="new-article-form hidden">
+            <h3>Créer une nouvelle catégorie</h3>
+            <div class="form-row">
+              <div class="form-group" style="grid-column: 1 / -1">
+                <label>Nom de la catégorie</label>
+                <input
+                  type="text"
+                  id="newCategoryNom"
+                  placeholder="Ex: Potions, Talismans, Reliques..."
+                />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button id="cancelNewCategory" class="btn-secondary">
+                Annuler
+              </button>
+              <button id="confirmNewCategory" class="btn-primary">
+                Créer la catégorie
+              </button>
+            </div>
+          </div>
+
+          <div id="stockContent">Chargement...</div>
+        </div>
+
+        <div id="adminComptabilite" class="admin-panel hidden">
+          <div id="comptabiliteContent">Chargement...</div>
+        </div>
+      </div>
+    </section>
 
     <script src="data.js"></script>
     <script src="script.js"></script>
