@@ -2158,3 +2158,16 @@ body.edit-mode .row-clickable {
     grid-template-columns: 1fr;
   }
 }
+/* Articles custom dans tableaux complexes (armes/armures) */
+.table-grid tr:has(.custom-badge) {
+  background-color: rgba(245, 158, 11, 0.05);
+}
+.table-grid tr:has(.custom-badge):hover {
+  background-color: rgba(245, 158, 11, 0.15);
+}
+
+/* Fix colonne "Total sans bouclier / Torse" qui trainait sur 2 lignes */
+.table-grid td:first-child {
+  white-space: normal;
+  word-wrap: break-word;
+}

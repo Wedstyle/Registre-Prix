@@ -731,7 +731,6 @@ async function chargerArticlesSupprimes() {
   }
 }
 
-// ✅ MODIFIÉ : ajout du paramètre champ
 function estSupprime(cat, idx, champ = "default") {
   return articlesSupprimes.some(
     (a) =>
@@ -820,7 +819,6 @@ function renderAllSections() {
 
     const tbody = document.createElement("tbody");
     data.items.forEach((item, index) => {
-      // ✅ FIX : skip la ligne seulement si c'est une catégorie simple
       const estListeSimple = [
         "nourriture",
         "sacs",
@@ -873,17 +871,58 @@ function renderAllSections() {
       tbody.appendChild(tr);
     });
 
+    // === ARTICLES PERSONNALISÉS ===
     const customCat = customArticles.filter(
       (a) => a.categorie === key && !estSupprime("custom", a.id, "default"),
     );
-    customCat.forEach((a) => {
-      const tr = document.createElement("tr");
-      tr.classList.add("row-clickable");
-      tr.dataset.customId = a.id;
-      tr.innerHTML = `<td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
-                <td class="price" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}">${a.prix}</td>`;
-      tbody.appendChild(tr);
-    });
+
+    if (customCat.length > 0) {
+      let nbColonnes = 2;
+      if (key === "armes") nbColonnes = 8;
+      else if (key === "armures") nbColonnes = 15;
+      else if (key === "bijoux") nbColonnes = 3;
+
+      if (key === "armes" || key === "armures" || key === "bijoux") {
+        const trSep = document.createElement("tr");
+        trSep.innerHTML = `<td colspan="${nbColonnes}" style="padding: 0;">
+                    <div style="padding: 10px 16px; background: rgba(245,158,11,0.1); border-top: 2px solid var(--accent); font-size: 0.75rem; color: var(--accent); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">
+                        📦 Articles personnalisés
+                    </div>
+                </td>`;
+        tbody.appendChild(trSep);
+      }
+
+      customCat.forEach((a) => {
+        const tr = document.createElement("tr");
+        tr.classList.add("row-clickable");
+        tr.dataset.customId = a.id;
+
+        if (key === "armes" || key === "armures") {
+          tr.innerHTML = `
+                        <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
+                        <td colspan="${nbColonnes - 1}" class="price cell-clickable"
+                            data-price-cell data-cat="custom" data-index="${a.id}" 
+                            data-field="prix" data-nom="${a.nom}" 
+                            data-prix="${a.prix}"
+                            style="text-align: right; padding-right: 24px;">
+                            ${a.prix} S
+                        </td>
+                    `;
+        } else if (key === "bijoux") {
+          tr.innerHTML = `
+                        <td>Personnalisé</td>
+                        <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
+                        <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
+                    `;
+        } else {
+          tr.innerHTML = `
+                        <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
+                        <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
+                    `;
+        }
+        tbody.appendChild(tr);
+      });
+    }
 
     table.appendChild(tbody);
     tableResponsive.appendChild(table);
@@ -891,6 +930,7 @@ function renderAllSections() {
     mainContent.appendChild(section);
   }
 
+  // === CATÉGORIES PERSONNALISÉES ===
   customCategories.forEach((c) => {
     const catKey = `cat_${c.id}`;
     const section = document.createElement("section");
@@ -925,7 +965,7 @@ function renderAllSections() {
         tr.classList.add("row-clickable");
         tr.dataset.customId = a.id;
         tr.innerHTML = `<td><strong>${a.nom}</strong></td>
-                    <td class="price" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}">${a.prix}</td>`;
+                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>`;
         tbody.appendChild(tr);
       });
     }
@@ -936,11 +976,9 @@ function renderAllSections() {
   });
 }
 
-// ✅ MODIFIÉ : vérifie la suppression par variante
 function creerCellulePrix(nomArticle, materiau, valeurPrix, cat, index, field) {
   const dataAttrs = `data-price-cell data-cat="${cat}" data-index="${index}" data-field="${field}" data-nom="${nomArticle}" data-materiau="${materiau}"`;
 
-  // Si cette variante précise est supprimée → cellule masquée
   if (estSupprime(cat, index, field)) {
     return `<td class="price cell-vide" ${dataAttrs}>-</td>`;
   }
@@ -1451,7 +1489,6 @@ function renderStock() {
       catData.items.forEach((item, idx) => {
         mats.forEach((mat) => {
           const val = item[mat];
-          // ✅ FIX : exclure uniquement la variante supprimée
           if (
             val &&
             val !== "-" &&
@@ -1505,7 +1542,6 @@ function renderStock() {
       catData.items.forEach((item, idx) => {
         mats.forEach((mat) => {
           const val = item[mat];
-          // ✅ FIX : exclure uniquement la variante supprimée
           if (
             val &&
             val !== "-" &&
@@ -1634,7 +1670,6 @@ function creerBlocStock(titre, allRows, catKey, isCustomCat = false) {
       if (isCustom) {
         deleteBtn = `<button class="btn-delete-custom" data-del="${r.customId}" title="Supprimer">🗑️</button>`;
       } else if (catKey && !catKey.startsWith("cat_")) {
-        // ✅ FIX : ajout de data-delstd-champ pour distinguer les variantes
         deleteBtn = `<button class="btn-delete-custom" 
                     data-delstd-cat="${catKey}" 
                     data-delstd-idx="${r.idx}" 
@@ -1763,7 +1798,6 @@ function attacherEvenementsStock(container) {
         )
           return;
 
-        // ✅ FIX : on enregistre le champ précis
         const { error } = await supabaseClient
           .from("articles_supprimes")
           .insert({
@@ -1778,7 +1812,6 @@ function attacherEvenementsStock(container) {
           return;
         }
 
-        // ✅ Supprimer aussi la ligne de stock associée
         await supabaseClient
           .from("stock")
           .delete()
