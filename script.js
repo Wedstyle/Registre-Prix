@@ -412,15 +412,26 @@ function appliquerOverrides() {
 
 async function sauvegarderOverride(cat, index, field, value) {
   if (cat === "custom") {
-    const { error } = await supabaseClient
-      .from("custom_articles")
-      .update({ prix: String(value) })
-      .eq("id", index);
-    if (!error) {
-      const article = customArticles.find((a) => a.id == index);
-      if (article) article.prix = String(value);
+    const article = customArticles.find((a) => a.id == index);
+    if (!article) return false;
+
+    if (field === "prix") {
+      const { error } = await supabaseClient
+        .from("custom_articles")
+        .update({ prix: String(value) })
+        .eq("id", index);
+      if (!error) article.prix = String(value);
+      return !error;
+    } else {
+      const pd = { ...(article.prix_detail || {}) };
+      pd[field] = String(value);
+      const { error } = await supabaseClient
+        .from("custom_articles")
+        .update({ prix_detail: pd })
+        .eq("id", index);
+      if (!error) article.prix_detail = pd;
+      return !error;
     }
-    return !error;
   }
   prixOverrides[`${cat}:${index}:${field}`] = value;
   const { error } = await supabaseClient
@@ -818,6 +829,82 @@ function renderAllSections() {
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
+
+    // === ARTICLES PERSONNALISÉS EN PREMIER ===
+    const customCat = customArticles.filter(
+      (a) => a.categorie === key && !estSupprime("custom", a.id, "default"),
+    );
+
+    customCat.forEach((a) => {
+      const tr = document.createElement("tr");
+      tr.classList.add("row-clickable");
+      tr.dataset.customId = a.id;
+
+      if (key === "armes") {
+        const pd = a.prix_detail || {};
+        const mats = [
+          "fer",
+          "acier",
+          "commun",
+          "bosmer",
+          "altmer",
+          "dwemer",
+          "verre",
+        ];
+        tr.innerHTML = `
+                    <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
+                    ${mats
+                      .map((m) =>
+                        pd[m] !== undefined
+                          ? `<td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="${m}" data-nom="${a.nom}" data-prix="${pd[m]}">${pd[m]}</td>`
+                          : `<td class="price cell-vide">-</td>`,
+                      )
+                      .join("")}
+                `;
+      } else if (key === "armures") {
+        const pd = a.prix_detail || {};
+        const mats = [
+          "commun",
+          "peau",
+          "fourrure",
+          "cuir",
+          "imperial",
+          "imperial_lin",
+          "fer",
+          "acier",
+          "bosmer_leger",
+          "bosmer_lourd",
+          "chasse",
+          "altmer",
+          "dwemer",
+          "verre",
+        ];
+        tr.innerHTML = `
+                    <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
+                    ${mats
+                      .map((m) =>
+                        pd[m] !== undefined
+                          ? `<td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="${m}" data-nom="${a.nom}" data-prix="${pd[m]}">${pd[m]}</td>`
+                          : `<td class="price cell-vide">-</td>`,
+                      )
+                      .join("")}
+                `;
+      } else if (key === "bijoux") {
+        tr.innerHTML = `
+                    <td>Custom</td>
+                    <td><strong>${a.nom}</strong></td>
+                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
+                `;
+      } else {
+        tr.innerHTML = `
+                    <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
+                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
+                `;
+      }
+      tbody.appendChild(tr);
+    });
+
+    // === ARTICLES STANDARDS ENSUITE ===
     data.items.forEach((item, index) => {
       const estListeSimple = [
         "nourriture",
@@ -867,62 +954,6 @@ function renderAllSections() {
         tr.classList.add("row-clickable");
         tr.innerHTML = `<td><strong>${item.nom}</strong></td>
                     <td class="price" data-price-cell data-cat="${key}" data-index="${index}" data-field="prix" data-nom="${item.nom}">${item.prix}</td>`;
-      }
-      tbody.appendChild(tr);
-    });
-
-    // === ARTICLES PERSONNALISÉS : intégrés dans le tableau principal ===
-    const customCat = customArticles.filter(
-      (a) => a.categorie === key && !estSupprime("custom", a.id, "default"),
-    );
-
-    customCat.forEach((a) => {
-      const tr = document.createElement("tr");
-      tr.classList.add("row-clickable");
-      tr.dataset.customId = a.id;
-
-      if (key === "armes") {
-        // Armes : 8 colonnes (Nom + 7 matériaux) → prix dans la colonne Fer
-        tr.innerHTML = `
-                    <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
-                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                `;
-      } else if (key === "armures") {
-        // Armures : 15 colonnes (Nom + 14 matériaux) → prix dans la colonne Commun
-        tr.innerHTML = `
-                    <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
-                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                    <td class="price cell-vide">-</td>
-                `;
-      } else if (key === "bijoux") {
-        tr.innerHTML = `
-                    <td>Custom</td>
-                    <td><strong>${a.nom}</strong></td>
-                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
-                `;
-      } else {
-        tr.innerHTML = `
-                    <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
-                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
-                `;
       }
       tbody.appendChild(tr);
     });
@@ -1016,16 +1047,38 @@ document.addEventListener("click", (e) => {
 
   if (e.target.classList.contains("cell-clickable")) {
     if (!estValide) return avertirLectureSeule();
-    ajouterAuPanier(
-      e.target.dataset.nom,
-      e.target.dataset.prix,
-      e.target.dataset.materiau,
-      {
-        cat: e.target.dataset.cat,
-        idx: parseInt(e.target.dataset.index),
-        champ: e.target.dataset.field,
-      },
-    );
+
+    const cat = e.target.dataset.cat;
+    const field = e.target.dataset.field;
+    const nom = e.target.dataset.nom;
+    const idx = parseInt(e.target.dataset.index);
+    const prix = e.target.dataset.prix;
+
+    let details = e.target.dataset.materiau || "";
+    let champ = field;
+
+    if (cat === "custom" && field !== "prix") {
+      const matLabels = {
+        fer: "Fer",
+        acier: "Acier",
+        commun: "Commun",
+        bosmer: "Bosmer",
+        altmer: "Altmer",
+        dwemer: "Dwemer",
+        verre: "Verre",
+        peau: "Peau",
+        fourrure: "Fourrure",
+        cuir: "Cuir",
+        imperial: "Impérial",
+        imperial_lin: "Impérial Lin",
+        bosmer_leger: "Bosmer Léger",
+        bosmer_lourd: "Bosmer Lourd",
+        chasse: "Chasse sauvage",
+      };
+      details = matLabels[field] || field;
+    }
+
+    ajouterAuPanier(nom, prix, details, { cat, idx, champ });
     e.target.style.backgroundColor = "rgba(245, 158, 11, 0.3)";
     setTimeout(() => {
       e.target.style.backgroundColor = "";
@@ -1580,15 +1633,52 @@ function renderStock() {
       (a) => a.categorie === catKey && !estSupprime("custom", a.id, "default"),
     );
     customs.forEach((a) => {
-      allRows.push({
-        nom: a.nom,
-        key: `custom:${a.id}:default`,
-        cat: "custom",
-        idx: a.id,
-        champ: "default",
-        isCustom: true,
-        customId: a.id,
-      });
+      if (
+        (catKey === "armes" || catKey === "armures") &&
+        a.prix_detail &&
+        Object.keys(a.prix_detail).length > 0
+      ) {
+        const matLabels = {
+          fer: "Fer",
+          acier: "Acier",
+          commun: "Commun",
+          bosmer: "Bosmer",
+          altmer: "Altmer",
+          dwemer: "Dwemer",
+          verre: "Verre",
+          peau: "Peau",
+          fourrure: "Fourrure",
+          cuir: "Cuir",
+          imperial: "Impérial",
+          imperial_lin: "Impérial Lin",
+          bosmer_leger: "Bosmer Léger",
+          bosmer_lourd: "Bosmer Lourd",
+          chasse: "Chasse sauvage",
+        };
+        Object.keys(a.prix_detail).forEach((mat) => {
+          allRows.push({
+            nom: `${a.nom} (${matLabels[mat] || mat})`,
+            key: `custom:${a.id}:${mat}`,
+            cat: "custom",
+            idx: a.id,
+            champ: mat,
+            isCustom: true,
+            customId: a.id,
+            itemNom: a.nom,
+          });
+        });
+      } else {
+        allRows.push({
+          nom: a.nom,
+          key: `custom:${a.id}:default`,
+          cat: "custom",
+          idx: a.id,
+          champ: "default",
+          isCustom: true,
+          customId: a.id,
+          itemNom: a.nom,
+        });
+      }
     });
 
     if (allRows.length === 0) return;
@@ -1608,6 +1698,7 @@ function renderStock() {
       champ: "default",
       isCustom: true,
       customId: a.id,
+      itemNom: a.nom,
     }));
     container.appendChild(creerBlocStock(c.nom, allRows, catKey, true));
   });
@@ -1920,7 +2011,106 @@ function ouvrirFormArticle() {
   document.getElementById("newArticleNom").value = "";
   document.getElementById("newArticlePrix").value = "";
   document.getElementById("newArticleStock").value = "0";
+
+  regenChampsMateriaux();
+  select.onchange = regenChampsMateriaux;
+
   form.classList.remove("hidden");
+}
+
+function regenChampsMateriaux() {
+  const cat = document.getElementById("newArticleCat").value;
+  const form = document.getElementById("newArticleForm");
+
+  const old = document.getElementById("materiauxBlock");
+  if (old) old.remove();
+
+  const simplePrixGroup = document
+    .getElementById("newArticlePrix")
+    .closest(".form-group");
+  const simpleStockGroup = document
+    .getElementById("newArticleStock")
+    .closest(".form-group");
+
+  const estComplexe = cat === "armes" || cat === "armures";
+
+  if (estComplexe) {
+    simplePrixGroup.style.display = "none";
+    simpleStockGroup.style.display = "none";
+
+    const materiaux =
+      cat === "armes"
+        ? [
+            { key: "fer", label: "Fer" },
+            { key: "acier", label: "Acier" },
+            { key: "commun", label: "Commun" },
+            { key: "bosmer", label: "Bosmer" },
+            { key: "altmer", label: "Altmer" },
+            { key: "dwemer", label: "Dwemer" },
+            { key: "verre", label: "Verre" },
+          ]
+        : [
+            { key: "commun", label: "Commun" },
+            { key: "peau", label: "Peau" },
+            { key: "fourrure", label: "Fourrure" },
+            { key: "cuir", label: "Cuir" },
+            { key: "imperial", label: "Impérial" },
+            { key: "imperial_lin", label: "Impérial (Lin)" },
+            { key: "fer", label: "Fer" },
+            { key: "acier", label: "Acier" },
+            { key: "bosmer_leger", label: "Bosmer Léger" },
+            { key: "bosmer_lourd", label: "Bosmer Lourd" },
+            { key: "chasse", label: "Chasse sauvage" },
+            { key: "altmer", label: "Altmer" },
+            { key: "dwemer", label: "Dwemer" },
+            { key: "verre", label: "Verre" },
+          ];
+
+    const div = document.createElement("div");
+    div.id = "materiauxBlock";
+    div.style.cssText =
+      "grid-column: 1 / -1; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border);";
+    div.innerHTML = `
+            <label style="display: block; margin-bottom: 0.5rem; color: var(--accent); font-size: 0.85rem; font-weight: 700;">
+                💰 Prix par matériau (laisser vide si non disponible)
+            </label>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.5rem;">
+                ${materiaux
+                  .map(
+                    (m) => `
+                    <div>
+                        <label style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 2px; display: block;">${m.label}</label>
+                        <input type="text" class="mat-prix-input" data-material="${m.key}" placeholder="-" 
+                            style="width: 100%; padding: 0.4rem 0.6rem; background: var(--bg-header); border: 1px solid var(--border); border-radius: 6px; color: var(--text-main); font-size: 0.85rem; outline: none;">
+                    </div>
+                `,
+                  )
+                  .join("")}
+            </div>
+            <label style="display: block; margin-top: 0.75rem; margin-bottom: 0.5rem; color: var(--accent); font-size: 0.85rem; font-weight: 700;">
+                📦 Stock initial par matériau
+            </label>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.5rem;">
+                ${materiaux
+                  .map(
+                    (m) => `
+                    <div>
+                        <label style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 2px; display: block;">${m.label}</label>
+                        <input type="number" min="0" class="mat-stock-input" data-material="${m.key}" value="0" 
+                            style="width: 100%; padding: 0.4rem 0.6rem; background: var(--bg-header); border: 1px solid var(--border); border-radius: 6px; color: var(--text-main); font-size: 0.85rem; outline: none; text-align: center;">
+                    </div>
+                `,
+                  )
+                  .join("")}
+            </div>
+        `;
+
+    const formRow = form.querySelector(".form-row");
+    if (formRow) formRow.appendChild(div);
+  } else {
+    simplePrixGroup.style.display = "";
+    simpleStockGroup.style.display = "";
+  }
 }
 
 function fermerFormArticle() {
@@ -1969,22 +2159,54 @@ async function creerCategorie() {
 async function creerArticle() {
   const cat = document.getElementById("newArticleCat").value;
   const nom = document.getElementById("newArticleNom").value.trim();
-  const prix = document.getElementById("newArticlePrix").value.trim();
-  const stockInit =
-    parseInt(document.getElementById("newArticleStock").value) || 0;
 
   if (!nom) {
     afficherToast("Nom requis.", "error");
     return;
   }
-  if (!prix) {
-    afficherToast("Prix requis.", "error");
-    return;
+
+  const estComplexe = cat === "armes" || cat === "armures";
+  let prixSimple = "";
+  let prixDetail = {};
+  let stocksParMateriau = {};
+
+  if (estComplexe) {
+    document.querySelectorAll(".mat-prix-input").forEach((input) => {
+      const val = input.value.trim();
+      if (val) prixDetail[input.dataset.material] = val;
+    });
+
+    if (Object.keys(prixDetail).length === 0) {
+      afficherToast("Entrez au moins un prix.", "error");
+      return;
+    }
+
+    document.querySelectorAll(".mat-stock-input").forEach((input) => {
+      const mat = input.dataset.material;
+      if (prixDetail[mat] !== undefined) {
+        stocksParMateriau[mat] = parseInt(input.value) || 0;
+      }
+    });
+
+    const premierMat = Object.keys(prixDetail)[0];
+    prixSimple = String(prixDetail[premierMat]);
+  } else {
+    prixSimple = document.getElementById("newArticlePrix").value.trim();
+    if (!prixSimple) {
+      afficherToast("Prix requis.", "error");
+      return;
+    }
   }
 
   const { data, error } = await supabaseClient
     .from("custom_articles")
-    .insert({ categorie: cat, nom, prix, created_by: utilisateurCourant?.id })
+    .insert({
+      categorie: cat,
+      nom,
+      prix: prixSimple,
+      prix_detail: prixDetail,
+      created_by: utilisateurCourant?.id,
+    })
     .select()
     .single();
 
@@ -1993,17 +2215,35 @@ async function creerArticle() {
     return;
   }
 
-  await supabaseClient.from("stock").upsert(
-    {
-      categorie: "custom",
-      item_index: data.id,
-      champ: "default",
-      item_nom: nom,
-      quantite: stockInit,
-      seuil_alerte: 5,
-    },
-    { onConflict: "categorie,item_index,champ" },
-  );
+  if (estComplexe) {
+    for (const mat of Object.keys(prixDetail)) {
+      await supabaseClient.from("stock").upsert(
+        {
+          categorie: "custom",
+          item_index: data.id,
+          champ: mat,
+          item_nom: nom,
+          quantite: stocksParMateriau[mat] || 0,
+          seuil_alerte: 5,
+        },
+        { onConflict: "categorie,item_index,champ" },
+      );
+    }
+  } else {
+    const stockInit =
+      parseInt(document.getElementById("newArticleStock").value) || 0;
+    await supabaseClient.from("stock").upsert(
+      {
+        categorie: "custom",
+        item_index: data.id,
+        champ: "default",
+        item_nom: nom,
+        quantite: stockInit,
+        seuil_alerte: 5,
+      },
+      { onConflict: "categorie,item_index,champ" },
+    );
+  }
 
   await chargerArticlesCustom();
   await chargerStock();

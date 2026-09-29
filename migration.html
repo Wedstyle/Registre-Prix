@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Migration - Registre des Marchandises</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        background: #0f172a;
+        color: #f8fafc;
+        padding: 2rem;
+        max-width: 900px;
+        margin: 0 auto;
+      }
+      h1 {
+        color: #f59e0b;
+        margin-bottom: 1rem;
+      }
+      p {
+        line-height: 1.6;
+        margin-bottom: 1rem;
+      }
+      button {
+        background: #f59e0b;
+        color: #fff;
+        border: none;
+        padding: 1rem 2rem;
+        font-size: 1.1rem;
+        font-weight: 700;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      button:hover {
+        background: #d97706;
+        transform: translateY(-2px);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+      #log {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1.5rem;
+        max-height: 500px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+      }
+      .success {
+        color: #22c55e;
+      }
+      .error {
+        color: #ef4444;
+      }
+      .info {
+        color: #94a3b8;
+      }
+      .warning {
+        color: #f59e0b;
+      }
+      .warning-box {
+        background: rgba(245, 158, 11, 0.1);
+        border-left: 4px solid #f59e0b;
+        padding: 1rem;
+        border-radius: 4px;
+        margin: 1rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🚀 Migration des données</h1>
+
+    <div class="warning-box">
+      <strong>⚠️ À lire avant de lancer :</strong>
+      <ul style="margin: 0.5rem 0 0 1rem">
+        <li>
+          Cette migration va copier tout le contenu de <code>data.js</code> dans
+          Supabase
+        </li>
+        <li>
+          Ne relance <strong>JAMAIS</strong> ce script deux fois (ça créerait
+          des doublons)
+        </li>
+        <li>
+          Après la migration, tu pourras <strong>supprimer ce fichier</strong>
+        </li>
+      </ul>
+    </div>
+
+    <p>Vérifie que :</p>
+    <ul style="margin-left: 2rem; line-height: 1.8">
+      <li>
+        ✅ Tu as bien exécuté le SQL de création des tables (materiaux,
+        articles, prix_articles)
+      </li>
+      <li>✅ Tu es connecté en tant que <strong>patron</strong> sur le site</li>
+      <li>✅ <code>data.js</code> est bien à côté de ce fichier</li>
+    </ul>
+
+    <p style="margin-top: 2rem">
+      <button id="btnMigrer" onclick="lancerMigration()">
+        ▶️ Lancer la migration
+      </button>
+    </p>
+
+    <div id="log"></div>
+
+    <!-- Charge data.js -->
+    <script src="data.js"></script>
+    <script>
+      // Config Supabase
+      const SUPABASE_URL = "https://snrwlsrqomysfyvuayfm.supabase.co";
+      const SUPABASE_ANON_KEY =
+        "sb_publishable_H1Zv0Sk1H_ITiT3E1RTfxQ_EKrne7_D";
+      const supabaseClient = window.supabase.createClient(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+      );
+
+      // =========================================================
+      // CONFIGURATION PAR CATÉGORIE
+      // =========================================================
+      const CONFIG_CATEGORIES = {
+        nourriture: { type: "simple" },
+        sacs: { type: "simple" },
+        vetements: { type: "simple" },
+        chapeaux: { type: "simple" },
+        chaussures: { type: "simple" },
+        outils: { type: "simple" },
+
+        armes: {
+          type: "multi",
+          materiaux: [
+            { key: "fer", label: "Fer" },
+            { key: "acier", label: "Acier" },
+            { key: "commun", label: "Commun" },
+            { key: "bosmer", label: "Bosmer" },
+            { key: "altmer", label: "Altmer" },
+            { key: "dwemer", label: "Dwemer" },
+            { key: "verre", label: "Verre" },
+          ],
+        },
+
+        armures: {
+          type: "multi",
+          materiaux: [
+            { key: "commun", label: "Commun" },
+            { key: "peau", label: "Peau" },
+            { key: "fourrure", label: "Fourrure" },
+            { key: "cuir", label: "Cuir" },
+            { key: "imperial", label: "Impérial" },
+            { key: "imperial_lin", label: "Impérial (Lin)" },
+            { key: "fer", label: "Fer" },
+            { key: "acier", label: "Acier" },
+            { key: "bosmer_leger", label: "Bosmer Léger" },
+            { key: "bosmer_lourd", label: "Bosmer Lourd" },
+            { key: "chasse", label: "Chasse sauvage" },
+            { key: "altmer", label: "Altmer" },
+            { key: "dwemer", label: "Dwemer" },
+            { key: "verre", label: "Verre" },
+          ],
+        },
+
+        bijoux: {
+          type: "simple",
+          // Colonnes : Type, Pierre/Métal, Prix → on prend le nom = "Type - Pierre"
+          transformerNom: (item) => `${item.type} - ${item.nom}`,
+        },
+      };
+
+      // =========================================================
+      // LOG
+      // =========================================================
+      function log(msg, type = "info") {
+        const el = document.getElementById("log");
+        const div = document.createElement("div");
+        div.className = type;
+        div.textContent = msg;
+        el.appendChild(div);
+        el.scrollTop = el.scrollHeight;
+      }
+
+      // =========================================================
+      // MIGRATION
+      // =========================================================
+      async function lancerMigration() {
+        const btn = document.getElementById("btnMigrer");
+        btn.disabled = true;
+        btn.textContent = "⏳ Migration en cours...";
+
+        log("🚀 Début de la migration", "info");
+        log("");
+
+        // Vérifier que l'utilisateur est connecté
+        const {
+          data: { user },
+        } = await supabaseClient.auth.getUser();
+        if (!user) {
+          log(
+            "❌ Tu dois être connecté en tant que patron sur le site avant de lancer la migration.",
+            "error",
+          );
+          log("   (Ouvre index.html, connecte-toi, puis reviens ici)", "error");
+          btn.disabled = false;
+          btn.textContent = "▶️ Lancer la migration";
+          return;
+        }
+        log(`✅ Connecté en tant que : ${user.email}`, "success");
+        log("");
+
+        // Vérifier que registreData existe
+        if (typeof registreData === "undefined") {
+          log("❌ data.js n'est pas chargé correctement.", "error");
+          btn.disabled = false;
+          btn.textContent = "▶️ Lancer la migration";
+          return;
+        }
+
+        const categories = Object.keys(registreData);
+        log(`📋 ${categories.length} catégories trouvées`, "info");
+        log("");
+
+        // Compter total pour progression
+        let totalItems = 0;
+        categories.forEach((cat) => {
+          totalItems += registreData[cat].items.length;
+        });
+        log(`📦 ${totalItems} articles à migrer`, "info");
+        log("");
+
+        // =========================================================
+        // MIGRATION DE CHAQUE CATÉGORIE
+        // =========================================================
+        let itemsMigres = 0;
+        let prixCrees = 0;
+        let erreurs = 0;
+
+        for (const catKey of categories) {
+          const catData = registreData[catKey];
+          const config = CONFIG_CATEGORIES[catKey];
+
+          if (!config) {
+            log(`⚠️ Catégorie inconnue : ${catKey}`, "warning");
+            continue;
+          }
+
+          log(`▶️ Catégorie : ${catData.title} (${catKey})`, "info");
+
+          // 1. Créer les matériaux
+          const materiauxCrees = {};
+
+          if (config.type === "multi") {
+            for (let i = 0; i < config.materiaux.length; i++) {
+              const mat = config.materiaux[i];
+              const { data, error } = await supabaseClient
+                .from("materiaux")
+                .insert({
+                  categorie: catKey,
+                  nom: mat.label,
+                  ordre: i,
+                })
+                .select()
+                .single();
+
+              if (error) {
+                log(
+                  `   ❌ Erreur matériau ${mat.label} : ${error.message}`,
+                  "error",
+                );
+                erreurs++;
+                continue;
+              }
+              materiauxCrees[mat.key] = data.id;
+              log(`   ✅ Matériau créé : ${mat.label}`, "success");
+            }
+          } else {
+            // Catégorie simple : un seul matériau "Standard"
+            const { data, error } = await supabaseClient
+              .from("materiaux")
+              .insert({
+                categorie: catKey,
+                nom: "Standard",
+                ordre: 0,
+              })
+              .select()
+              .single();
+
+            if (error) {
+              log(`   ❌ Erreur matériau Standard : ${error.message}`, "error");
+              erreurs++;
+              continue;
+            }
+            materiauxCrees["default"] = data.id;
+            log(`   ✅ Matériau créé : Standard`, "success");
+          }
+
+          log("");
+
+          // 2. Créer les articles
+          const items = catData.items;
+          for (let idx = 0; idx < items.length; idx++) {
+            const item = items[idx];
+
+            // Nom de l'article
+            let nom = item.nom;
+            if (config.transformerNom) {
+              nom = config.transformerNom(item);
+            }
+
+            // Créer l'article
+            const { data: article, error: artErr } = await supabaseClient
+              .from("articles")
+              .insert({
+                categorie: catKey,
+                nom: nom,
+                ordre: idx,
+              })
+              .select()
+              .single();
+
+            if (artErr) {
+              log(`   ❌ Erreur article "${nom}" : ${artErr.message}`, "error");
+              erreurs++;
+              continue;
+            }
+
+            // 3. Créer les prix
+            if (config.type === "multi") {
+              // Plusieurs matériaux
+              for (const mat of config.materiaux) {
+                const prix = item[mat.key];
+
+                // Ignorer les prix invalides
+                if (!prix || prix === "-" || prix === "X") continue;
+
+                const { error: prixErr } = await supabaseClient
+                  .from("prix_articles")
+                  .insert({
+                    article_id: article.id,
+                    materiau_id: materiauxCrees[mat.key],
+                    prix: String(prix),
+                  });
+
+                if (prixErr) {
+                  log(
+                    `   ❌ Erreur prix ${nom} × ${mat.label} : ${prixErr.message}`,
+                    "error",
+                  );
+                  erreurs++;
+                } else {
+                  prixCrees++;
+                }
+              }
+            } else {
+              // Un seul prix
+              const prix = item.prix;
+              if (prix && prix !== "-" && prix !== "X") {
+                const { error: prixErr } = await supabaseClient
+                  .from("prix_articles")
+                  .insert({
+                    article_id: article.id,
+                    materiau_id: materiauxCrees["default"],
+                    prix: String(prix),
+                  });
+
+                if (prixErr) {
+                  log(`   ❌ Erreur prix ${nom} : ${prixErr.message}`, "error");
+                  erreurs++;
+                } else {
+                  prixCrees++;
+                }
+              }
+            }
+
+            itemsMigres++;
+
+            // Afficher la progression tous les 10 items
+            if (itemsMigres % 10 === 0) {
+              log(
+                `   ... ${itemsMigres}/${totalItems} articles migrés`,
+                "info",
+              );
+            }
+          }
+
+          log(
+            `   ✅ ${items.length} articles migrés dans ${catData.title}`,
+            "success",
+          );
+          log("");
+        }
+
+        // =========================================================
+        // RÉSUMÉ
+        // =========================================================
+        log("═══════════════════════════════════════", "info");
+        log("🎉 MIGRATION TERMINÉE", "success");
+        log("═══════════════════════════════════════", "info");
+        log(`📦 Articles migrés : ${itemsMigres}`, "success");
+        log(`💰 Prix créés : ${prixCrees}`, "success");
+        if (erreurs > 0) {
+          log(`⚠️ Erreurs : ${erreurs}`, "error");
+        } else {
+          log(`✅ Aucune erreur`, "success");
+        }
+        log("");
+        log("➡️ Tu peux maintenant :", "warning");
+        log("   1. Recharger ton site (index.html)", "warning");
+        log("   2. Supprimer ce fichier migration.html", "warning");
+        log(
+          "   3. Supprimer aussi data.js (optionnel, on le garde en backup)",
+          "warning",
+        );
+
+        btn.textContent = "✅ Migration terminée";
+      }
+    </script>
+  </body>
+</html>
