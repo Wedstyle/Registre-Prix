@@ -9,7 +9,7 @@
       rel="stylesheet"
     />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link rel="stylesheet" href="style.css?v=6000" />
+    <link rel="stylesheet" href="style.css?v=8001" />
   </head>
   <body>
     <nav class="main-nav">
@@ -151,13 +151,6 @@
             <button id="editToggle" class="btn-toolbar" style="display: none">
               ✏️ Modifier les prix
             </button>
-            <button
-              id="resetPrix"
-              class="btn-toolbar btn-danger"
-              style="display: none"
-            >
-              🔄 Réinitialiser
-            </button>
           </div>
         </header>
         <div class="layout">
@@ -190,13 +183,13 @@
                 </div>
                 <div class="panier-total">
                   <span>Total :</span>
-                  <span>
-                    <span id="panier-total">0</span> Septims
+                  <span
+                    ><span id="panier-total">0</span> Septims
                     <small
                       id="panier-remise-info"
                       style="display: none; color: #22c55e"
-                    ></small>
-                  </span>
+                    ></small
+                  ></span>
                 </div>
                 <button id="validerVente" class="btn-valider-vente">
                   💾 Valider la vente
@@ -217,7 +210,6 @@
           <h1 class="page-title-big">📊 Tableau de bord</h1>
           <p class="page-subtitle">Vue d'ensemble du magasin en temps réel</p>
         </header>
-
         <div id="dashboardContent">Chargement...</div>
       </div>
     </section>
@@ -248,91 +240,182 @@
             <input
               type="text"
               id="stockSearch"
-              placeholder="🔍 Rechercher un article..."
+              placeholder="🔍 Rechercher..."
               class="stock-search"
             />
-            <button id="btnAddArticle" class="btn-toolbar">
-              ➕ Nouvel article
-            </button>
-            <button id="btnAddCategorie" class="btn-toolbar">
-              📁 Nouvelle catégorie
-            </button>
-            <button id="stockSaveAll" class="btn-primary">
-              💾 Tout sauvegarder
-            </button>
           </div>
-
-          <div id="newArticleForm" class="new-article-form hidden">
-            <h3>Créer un nouvel article</h3>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Catégorie</label>
-                <select id="newArticleCat"></select>
-              </div>
-              <div class="form-group">
-                <label>Nom de l'article</label>
-                <input
-                  type="text"
-                  id="newArticleNom"
-                  placeholder="Ex: Épée en argent"
-                />
-              </div>
-              <div class="form-group">
-                <label>Prix (Septims)</label>
-                <input
-                  type="number"
-                  id="newArticlePrix"
-                  min="0"
-                  placeholder="Ex: 150"
-                />
-              </div>
-              <div class="form-group">
-                <label>Stock initial</label>
-                <input type="number" id="newArticleStock" min="0" value="0" />
-              </div>
-            </div>
-            <div class="form-actions">
-              <button id="cancelNewArticle" class="btn-secondary">
-                Annuler
-              </button>
-              <button id="confirmNewArticle" class="btn-primary">
-                Créer l'article
-              </button>
-            </div>
-          </div>
-
-          <div id="newCategoryForm" class="new-article-form hidden">
-            <h3>Créer une nouvelle catégorie</h3>
-            <div class="form-row">
-              <div class="form-group" style="grid-column: 1 / -1">
-                <label>Nom de la catégorie</label>
-                <input
-                  type="text"
-                  id="newCategoryNom"
-                  placeholder="Ex: Potions, Talismans, Reliques..."
-                />
-              </div>
-            </div>
-            <div class="form-actions">
-              <button id="cancelNewCategory" class="btn-secondary">
-                Annuler
-              </button>
-              <button id="confirmNewCategory" class="btn-primary">
-                Créer la catégorie
-              </button>
-            </div>
-          </div>
-
           <div id="stockContent">Chargement...</div>
         </div>
 
         <div id="adminComptabilite" class="admin-panel hidden">
           <div id="comptabiliteContent">Chargement...</div>
         </div>
+
+        <!-- Modal : Ajouter un matériau -->
+        <div id="modalAddMat" class="modal-overlay hidden">
+          <div class="modal-content">
+            <button class="modal-close" onclick="fermerModal('modalAddMat')">
+              ✕
+            </button>
+            <h2 class="modal-title">➕ Ajouter une colonne</h2>
+            <p
+              style="
+                color: var(--text-muted);
+                font-size: 0.85rem;
+                text-align: center;
+                margin-bottom: 1rem;
+              "
+            >
+              Catégorie :
+              <strong id="modalAddMatCat" style="color: var(--accent)"></strong>
+            </p>
+            <form id="formAddMat">
+              <div class="form-group">
+                <label>Nom de la colonne (matériau)</label>
+                <input
+                  type="text"
+                  id="addMatNom"
+                  required
+                  placeholder="Ex: Ébonite, Mithril..."
+                />
+              </div>
+              <div class="form-group">
+                <label>Position dans le tableau</label>
+                <select id="addMatPosition"></select>
+              </div>
+              <div class="form-actions">
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  onclick="fermerModal('modalAddMat')"
+                >
+                  Annuler
+                </button>
+                <button type="submit" class="btn-primary">Ajouter</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Modal : Ajouter un article -->
+        <div id="modalAddArt" class="modal-overlay hidden">
+          <div class="modal-content">
+            <button class="modal-close" onclick="fermerModal('modalAddArt')">
+              ✕
+            </button>
+            <h2 class="modal-title">➕ Ajouter un article</h2>
+            <p
+              style="
+                color: var(--text-muted);
+                font-size: 0.85rem;
+                text-align: center;
+                margin-bottom: 1rem;
+              "
+            >
+              Catégorie :
+              <strong id="modalAddArtCat" style="color: var(--accent)"></strong>
+            </p>
+            <form id="formAddArt">
+              <div class="form-group">
+                <label>Nom de l'article</label>
+                <input
+                  type="text"
+                  id="addArtNom"
+                  required
+                  placeholder="Ex: Épée longue, Casque lourd..."
+                />
+              </div>
+              <div class="form-group">
+                <label>Position dans le tableau</label>
+                <select id="addArtPosition"></select>
+              </div>
+              <div class="form-actions">
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  onclick="fermerModal('modalAddArt')"
+                >
+                  Annuler
+                </button>
+                <button type="submit" class="btn-primary">Ajouter</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Modal : Gérer -->
+        <div id="modalManage" class="modal-overlay hidden">
+          <div class="modal-content modal-large">
+            <button class="modal-close" onclick="fermerModal('modalManage')">
+              ✕
+            </button>
+            <h2 class="modal-title">⚙️ Gérer</h2>
+            <p
+              style="
+                color: var(--text-muted);
+                font-size: 0.85rem;
+                text-align: center;
+                margin-bottom: 1.5rem;
+              "
+            >
+              Catégorie :
+              <strong id="modalManageCat" style="color: var(--accent)"></strong>
+            </p>
+            <h3
+              style="
+                color: var(--accent);
+                font-family: var(--font-title);
+                font-size: 1rem;
+                margin-bottom: 0.75rem;
+              "
+            >
+              📊 Colonnes (matériaux)
+            </h3>
+            <div id="manageColonnes" style="margin-bottom: 2rem"></div>
+            <h3
+              style="
+                color: var(--accent);
+                font-family: var(--font-title);
+                font-size: 1rem;
+                margin-bottom: 0.75rem;
+              "
+            >
+              📦 Lignes (articles)
+            </h3>
+            <div id="manageLignes"></div>
+          </div>
+        </div>
+
+        <div
+          id="adminOutils"
+          style="
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border);
+            text-align: center;
+            display: none;
+          "
+        >
+          <p
+            style="
+              color: var(--text-muted);
+              font-size: 0.8rem;
+              margin-bottom: 1rem;
+            "
+          >
+            ⚙️ Outils développeur
+          </p>
+          <a
+            href="migration.html"
+            target="_blank"
+            class="btn-toolbar"
+            style="text-decoration: none; display: inline-flex"
+            >🚀 Migration de données</a
+          >
+        </div>
       </div>
     </section>
 
-    <script src="data.js"></script>
     <script src="script.js"></script>
   </body>
 </html>

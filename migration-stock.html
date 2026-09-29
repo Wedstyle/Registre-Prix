@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Migration du Stock</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        background: #0f172a;
+        color: #f8fafc;
+        padding: 2rem;
+        max-width: 900px;
+        margin: 0 auto;
+      }
+      h1 {
+        color: #f59e0b;
+        margin-bottom: 1rem;
+      }
+      button {
+        background: #f59e0b;
+        color: #fff;
+        border: none;
+        padding: 1rem 2rem;
+        font-size: 1.1rem;
+        font-weight: 700;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #d97706;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #log {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1.5rem;
+        max-height: 500px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+      }
+      .success {
+        color: #22c55e;
+      }
+      .error {
+        color: #ef4444;
+      }
+      .info {
+        color: #94a3b8;
+      }
+      .warning {
+        color: #f59e0b;
+      }
+      .warning-box {
+        background: rgba(245, 158, 11, 0.1);
+        border-left: 4px solid #f59e0b;
+        padding: 1rem;
+        border-radius: 4px;
+        margin: 1rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>📦 Migration du Stock</h1>
+
+    <div class="warning-box">
+      <strong>⚠️ Cette migration va convertir tes stocks existants</strong>
+      <ul style="margin: 0.5rem 0 0 1rem">
+        <li>
+          Convertir les anciens IDs (index) vers les nouveaux IDs Supabase
+        </li>
+        <li>Créer les lignes manquantes pour les matériaux</li>
+        <li>Migrer aussi le stock des articles custom</li>
+        <li><strong>Ne pas relancer deux fois</strong></li>
+      </ul>
+    </div>
+
+    <button id="btnMigrer" onclick="lancerMigration()">
+      ▶️ Lancer la migration du stock
+    </button>
+    <div id="log"></div>
+
+    <script src="data.js"></script>
+    <script>
+      const SUPABASE_URL = "https://snrwlsrqomysfyvuayfm.supabase.co";
+      const SUPABASE_ANON_KEY =
+        "sb_publishable_H1Zv0Sk1H_ITiT3E1RTfxQ_EKrne7_D";
+      const supabaseClient = window.supabase.createClient(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+      );
+
+      // Correspondance des anciens champs → labels
+      const MAT_LABELS = {
+        fer: "Fer",
+        acier: "Acier",
+        commun: "Commun",
+        bosmer: "Bosmer",
+        altmer: "Altmer",
+        dwemer: "Dwemer",
+        verre: "Verre",
+        peau: "Peau",
+        fourrure: "Fourrure",
+        cuir: "Cuir",
+        imperial: "Impérial",
+        imperial_lin: "Impérial (Lin)",
+        bosmer_leger: "Bosmer Léger",
+        bosmer_lourd: "Bosmer Lourd",
+        chasse: "Chasse sauvage",
+        default: "Standard",
+      };
+
+      function log(msg, type = "info") {
+        const el = document.getElementById("log");
+        const div = document.createElement("div");
+        div.className = type;
+        div.textContent = msg;
+        el.appendChild(div);
+        el.scrollTop = el.scrollHeight;
+      }
+
+      async function lancerMigration() {
+        const btn = document.getElementById("btnMigrer");
+        btn.disabled = true;
+        btn.textContent = "⏳ Migration en cours...";
+
+        log("🚀 Début de la migration du stock", "info");
+        log("");
+
+        // Vérifier session
+        const {
+          data: { session },
+        } = await supabaseClient.auth.getSession();
+        if (!session || !session.user) {
+          log(
+            "❌ Tu dois être connecté en tant que patron sur index.html",
+            "error",
+          );
+          btn.disabled = false;
+          btn.textContent = "▶️ Lancer la migration";
+          return;
+        }
+        log(`✅ Session trouvée : ${session.user.email}`, "success");
+        log("");
+
+        // Récupérer tous les matériaux et articles depuis Supabase
+        log("📥 Chargement des matériaux et articles...", "info");
+        const { data: tousMateriaux } = await supabaseClient
+          .from("materiaux")
+          .select("*");
+        const { data: tousArticles } = await supabaseClient
+          .from("articles")
+          .select("*");
+        const { data: stocksActuels } = await supabaseClient
+          .from("stock")
+          .select("*");
+
+        log(`   ✅ ${tousMateriaux.length} matériaux`, "success");
+        log(`   ✅ ${tousArticles.length} articles`, "success");
+        log(
+          `   ✅ ${stocksActuels.length} lignes de stock à migrer`,
+          "success",
+        );
+        log("");
+
+        // Index de recherche rapide : clé = categorie:nom, valeur = id
+        const artIndex = {};
+        tousArticles.forEach((a) => {
+          artIndex[`${a.categorie}:${a.nom}`] = a.id;
+        });
+        const matIndex = {};
+        tousMateriaux.forEach((m) => {
+          matIndex[`${m.categorie}:${m.nom}`] = m.id;
+        });
+
+        let migres = 0;
+        let erreurs = 0;
+        let supprimes = 0;
+
+        // Migrer chaque ligne
+        for (const s of stocksActuels) {
+          let nouveauArticleId = null;
+          let nouveauMateriauId = null;
+
+          if (s.categorie === "custom") {
+            // Cas custom : chercher par nom
+            const nomArticle = s.item_nom;
+            // Chercher dans toutes les catégories
+            for (const cat of [
+              "armes",
+              "armures",
+              "nourriture",
+              "sacs",
+              "vetements",
+              "chapeaux",
+              "chaussures",
+              "outils",
+              "bijoux",
+              "cat_",
+            ]) {
+              if (artIndex[`${cat}:${nomArticle}`]) {
+                nouveauArticleId = artIndex[`${cat}:${nomArticle}`];
+                // Trouver le matériau correspondant
+                const matLabel = MAT_LABELS[s.champ] || s.champ;
+                nouveauMateriauId = matIndex[`${cat}:${matLabel}`];
+                break;
+              }
+            }
+            // Recherche par nom dans toute la table articles
+            if (!nouveauArticleId) {
+              const found = tousArticles.find((a) => a.nom === nomArticle);
+              if (found) {
+                nouveauArticleId = found.id;
+                const matLabel = MAT_LABELS[s.champ] || s.champ;
+                nouveauMateriauId = matIndex[`${found.categorie}:${matLabel}`];
+              }
+            }
+          } else {
+            // Cas standard : chercher par categorie + item_nom
+            nouveauArticleId = artIndex[`${s.categorie}:${s.item_nom}`];
+            if (nouveauArticleId) {
+              const matLabel = MAT_LABELS[s.champ] || "Standard";
+              nouveauMateriauId = matIndex[`${s.categorie}:${matLabel}`];
+            }
+          }
+
+          if (nouveauArticleId && nouveauMateriauId) {
+            // Mettre à jour la ligne
+            const { error } = await supabaseClient
+              .from("stock")
+              .update({
+                categorie:
+                  s.categorie === "custom"
+                    ? tousArticles.find((a) => a.id === nouveauArticleId)
+                        ?.categorie || s.categorie
+                    : s.categorie,
+                item_index: nouveauArticleId,
+                champ: String(nouveauMateriauId),
+              })
+              .eq("id", s.id);
+
+            if (error) {
+              log(
+                `❌ Erreur migration "${s.item_nom}" : ${error.message}`,
+                "error",
+              );
+              erreurs++;
+            } else {
+              migres++;
+              if (migres % 20 === 0)
+                log(`   ... ${migres} lignes migrées`, "info");
+            }
+          } else {
+            // Impossible de trouver : supprimer
+            await supabaseClient.from("stock").delete().eq("id", s.id);
+            supprimes++;
+          }
+        }
+
+        log("");
+        log("═══════════════════════════════════════", "info");
+        log("🎉 MIGRATION TERMINÉE", "success");
+        log("═══════════════════════════════════════", "info");
+        log(`✅ Lignes migrées : ${migres}`, "success");
+        log(`🗑️ Lignes supprimées (orphelines) : ${supprimes}`, "warning");
+        if (erreurs > 0) log(`❌ Erreurs : ${erreurs}`, "error");
+        log("");
+        log("➡️ Prochaine étape : je te donne le nouveau script.js", "warning");
+
+        btn.textContent = "✅ Migration terminée";
+      }
+    </script>
+  </body>
+</html>
