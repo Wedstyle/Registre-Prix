@@ -517,7 +517,6 @@ function ecouterChangementsTempsReel() {
       "postgres_changes",
       { event: "*", schema: "public", table: "employees" },
       (payload) => {
-        // Si c'est MOI qui ai été modifié → vérifier mon statut
         if (
           payload.new &&
           utilisateurCourant &&
@@ -525,7 +524,6 @@ function ecouterChangementsTempsReel() {
         ) {
           gererChangementMonProfil(payload.new);
         }
-        // Si je suis patron et sur la page admin employés → rafraîchir la liste
         if (utilisateurCourant?.role === "patron") {
           const cv = document.querySelector(".view.active");
           if (
@@ -544,7 +542,6 @@ function ecouterChangementsTempsReel() {
 }
 
 async function gererChangementMonProfil(nouveauProfil) {
-  // Cas 1 : j'ai été EXCLU
   if (nouveauProfil.actif === false) {
     afficherToast(
       "🚫 Votre compte a été désactivé. Déconnexion en cours...",
@@ -558,7 +555,6 @@ async function gererChangementMonProfil(nouveauProfil) {
     return;
   }
 
-  // Cas 2 : j'ai été INVALIDÉ
   if (nouveauProfil.valide === false && nouveauProfil.role !== "patron") {
     afficherToast(
       "⏸️ Votre compte a été invalidé. Retour en attente...",
@@ -573,7 +569,6 @@ async function gererChangementMonProfil(nouveauProfil) {
     return;
   }
 
-  // Cas 3 : mon rôle a changé (promotion/rétrogradation)
   if (utilisateurCourant && nouveauProfil.role !== utilisateurCourant.role) {
     const ancienRole = utilisateurCourant.role;
     utilisateurCourant = nouveauProfil;
@@ -587,7 +582,6 @@ async function gererChangementMonProfil(nouveauProfil) {
     return;
   }
 
-  // Cas 4 : ma validation est passée à true
   if (
     utilisateurCourant &&
     nouveauProfil.valide === true &&
@@ -737,9 +731,13 @@ async function chargerArticlesSupprimes() {
   }
 }
 
-function estSupprime(cat, idx) {
+// ✅ MODIFIÉ : ajout du paramètre champ
+function estSupprime(cat, idx, champ = "default") {
   return articlesSupprimes.some(
-    (a) => a.categorie === cat && a.item_index === idx,
+    (a) =>
+      a.categorie === cat &&
+      a.item_index === idx &&
+      (a.champ || "default") === champ,
   );
 }
 
@@ -822,7 +820,17 @@ function renderAllSections() {
 
     const tbody = document.createElement("tbody");
     data.items.forEach((item, index) => {
-      if (estSupprime(key, index)) return;
+      // ✅ FIX : skip la ligne seulement si c'est une catégorie simple
+      const estListeSimple = [
+        "nourriture",
+        "sacs",
+        "vetements",
+        "chapeaux",
+        "chaussures",
+        "outils",
+      ].includes(key);
+      if (estListeSimple && estSupprime(key, index, "default")) return;
+
       const tr = document.createElement("tr");
       if (key === "armes") {
         tr.innerHTML = `
@@ -866,7 +874,7 @@ function renderAllSections() {
     });
 
     const customCat = customArticles.filter(
-      (a) => a.categorie === key && !estSupprime("custom", a.id),
+      (a) => a.categorie === key && !estSupprime("custom", a.id, "default"),
     );
     customCat.forEach((a) => {
       const tr = document.createElement("tr");
@@ -904,7 +912,7 @@ function renderAllSections() {
 
     const tbody = document.createElement("tbody");
     const items = customArticles.filter(
-      (a) => a.categorie === catKey && !estSupprime("custom", a.id),
+      (a) => a.categorie === catKey && !estSupprime("custom", a.id, "default"),
     );
     if (items.length === 0) {
       const tr = document.createElement("tr");
@@ -928,9 +936,16 @@ function renderAllSections() {
   });
 }
 
+// ✅ MODIFIÉ : vérifie la suppression par variante
 function creerCellulePrix(nomArticle, materiau, valeurPrix, cat, index, field) {
-  const estInvalide = !valeurPrix || valeurPrix === "X" || valeurPrix === "-";
   const dataAttrs = `data-price-cell data-cat="${cat}" data-index="${index}" data-field="${field}" data-nom="${nomArticle}" data-materiau="${materiau}"`;
+
+  // Si cette variante précise est supprimée → cellule masquée
+  if (estSupprime(cat, index, field)) {
+    return `<td class="price cell-vide" ${dataAttrs}>-</td>`;
+  }
+
+  const estInvalide = !valeurPrix || valeurPrix === "X" || valeurPrix === "-";
   if (estInvalide)
     return `<td class="price cell-vide" ${dataAttrs}>${valeurPrix || "-"}</td>`;
   const valeurSafe = String(valeurPrix).replace(/"/g, "&quot;");
@@ -1434,10 +1449,15 @@ function renderStock() {
         verre: "Verre",
       };
       catData.items.forEach((item, idx) => {
-        if (estSupprime(catKey, idx)) return;
         mats.forEach((mat) => {
           const val = item[mat];
-          if (val && val !== "-" && val !== "X") {
+          // ✅ FIX : exclure uniquement la variante supprimée
+          if (
+            val &&
+            val !== "-" &&
+            val !== "X" &&
+            !estSupprime(catKey, idx, mat)
+          ) {
             allRows.push({
               nom: `${item.nom} (${labels[mat]})`,
               key: `${catKey}:${idx}:${mat}`,
@@ -1483,10 +1503,15 @@ function renderStock() {
         verre: "Verre",
       };
       catData.items.forEach((item, idx) => {
-        if (estSupprime(catKey, idx)) return;
         mats.forEach((mat) => {
           const val = item[mat];
-          if (val && val !== "-" && val !== "X") {
+          // ✅ FIX : exclure uniquement la variante supprimée
+          if (
+            val &&
+            val !== "-" &&
+            val !== "X" &&
+            !estSupprime(catKey, idx, mat)
+          ) {
             allRows.push({
               nom: `${item.nom} (${labels[mat]})`,
               key: `${catKey}:${idx}:${mat}`,
@@ -1500,7 +1525,7 @@ function renderStock() {
       });
     } else {
       catData.items.forEach((item, idx) => {
-        if (estSupprime(catKey, idx)) return;
+        if (estSupprime(catKey, idx, "default")) return;
         allRows.push({
           nom: item.nom,
           key: `${catKey}:${idx}:default`,
@@ -1513,7 +1538,7 @@ function renderStock() {
     }
 
     const customs = customArticles.filter(
-      (a) => a.categorie === catKey && !estSupprime("custom", a.id),
+      (a) => a.categorie === catKey && !estSupprime("custom", a.id, "default"),
     );
     customs.forEach((a) => {
       allRows.push({
@@ -1534,7 +1559,7 @@ function renderStock() {
   customCategories.forEach((c) => {
     const catKey = `cat_${c.id}`;
     const items = customArticles.filter(
-      (a) => a.categorie === catKey && !estSupprime("custom", a.id),
+      (a) => a.categorie === catKey && !estSupprime("custom", a.id, "default"),
     );
     const allRows = items.map((a) => ({
       nom: a.nom,
@@ -1609,11 +1634,13 @@ function creerBlocStock(titre, allRows, catKey, isCustomCat = false) {
       if (isCustom) {
         deleteBtn = `<button class="btn-delete-custom" data-del="${r.customId}" title="Supprimer">🗑️</button>`;
       } else if (catKey && !catKey.startsWith("cat_")) {
+        // ✅ FIX : ajout de data-delstd-champ pour distinguer les variantes
         deleteBtn = `<button class="btn-delete-custom" 
                     data-delstd-cat="${catKey}" 
                     data-delstd-idx="${r.idx}" 
-                    data-delstd-nom="${r.itemNom || r.nom}" 
-                    title="Masquer cet article">🗑️</button>`;
+                    data-delstd-champ="${r.champ || "default"}"
+                    data-delstd-nom="${r.nom}" 
+                    title="Masquer cette variante">🗑️</button>`;
       }
 
       itemDiv.innerHTML = `
@@ -1708,6 +1735,7 @@ function attacherEvenementsStock(container) {
       const delItem = e.target.dataset.del;
       const delStdCat = e.target.dataset.delstdCat;
       const delStdIdx = e.target.dataset.delstdIdx;
+      const delStdChamp = e.target.dataset.delstdChamp || "default";
       const delStdNom = e.target.dataset.delstdNom;
 
       if (delItem) {
@@ -1735,11 +1763,13 @@ function attacherEvenementsStock(container) {
         )
           return;
 
+        // ✅ FIX : on enregistre le champ précis
         const { error } = await supabaseClient
           .from("articles_supprimes")
           .insert({
             categorie: delStdCat,
             item_index: parseInt(delStdIdx),
+            champ: delStdChamp,
             item_nom: delStdNom,
           });
 
@@ -1748,11 +1778,19 @@ function attacherEvenementsStock(container) {
           return;
         }
 
+        // ✅ Supprimer aussi la ligne de stock associée
+        await supabaseClient
+          .from("stock")
+          .delete()
+          .eq("categorie", delStdCat)
+          .eq("item_index", parseInt(delStdIdx))
+          .eq("champ", delStdChamp);
+
         await chargerArticlesSupprimes();
         await chargerStock();
         renderAllSections();
         renderTabs();
-        afficherToast("✅ Article masqué.", "success");
+        afficherToast("✅ Variante masquée.", "success");
       }
     });
   });
