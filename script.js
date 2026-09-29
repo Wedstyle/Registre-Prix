@@ -871,58 +871,61 @@ function renderAllSections() {
       tbody.appendChild(tr);
     });
 
-    // === ARTICLES PERSONNALISÉS ===
+    // === ARTICLES PERSONNALISÉS : intégrés dans le tableau principal ===
     const customCat = customArticles.filter(
       (a) => a.categorie === key && !estSupprime("custom", a.id, "default"),
     );
 
-    if (customCat.length > 0) {
-      let nbColonnes = 2;
-      if (key === "armes") nbColonnes = 8;
-      else if (key === "armures") nbColonnes = 15;
-      else if (key === "bijoux") nbColonnes = 3;
+    customCat.forEach((a) => {
+      const tr = document.createElement("tr");
+      tr.classList.add("row-clickable");
+      tr.dataset.customId = a.id;
 
-      if (key === "armes" || key === "armures" || key === "bijoux") {
-        const trSep = document.createElement("tr");
-        trSep.innerHTML = `<td colspan="${nbColonnes}" style="padding: 0;">
-                    <div style="padding: 10px 16px; background: rgba(245,158,11,0.1); border-top: 2px solid var(--accent); font-size: 0.75rem; color: var(--accent); text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">
-                        📦 Articles personnalisés
-                    </div>
-                </td>`;
-        tbody.appendChild(trSep);
+      if (key === "armes") {
+        // Armes : 8 colonnes (Nom + 7 matériaux) → prix dans la colonne Fer
+        tr.innerHTML = `
+                    <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
+                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                `;
+      } else if (key === "armures") {
+        // Armures : 15 colonnes (Nom + 14 matériaux) → prix dans la colonne Commun
+        tr.innerHTML = `
+                    <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
+                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                    <td class="price cell-vide">-</td>
+                `;
+      } else if (key === "bijoux") {
+        tr.innerHTML = `
+                    <td>Custom</td>
+                    <td><strong>${a.nom}</strong></td>
+                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
+                `;
+      } else {
+        tr.innerHTML = `
+                    <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
+                    <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
+                `;
       }
-
-      customCat.forEach((a) => {
-        const tr = document.createElement("tr");
-        tr.classList.add("row-clickable");
-        tr.dataset.customId = a.id;
-
-        if (key === "armes" || key === "armures") {
-          tr.innerHTML = `
-                        <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
-                        <td colspan="${nbColonnes - 1}" class="price cell-clickable"
-                            data-price-cell data-cat="custom" data-index="${a.id}" 
-                            data-field="prix" data-nom="${a.nom}" 
-                            data-prix="${a.prix}"
-                            style="text-align: right; padding-right: 24px;">
-                            ${a.prix} S
-                        </td>
-                    `;
-        } else if (key === "bijoux") {
-          tr.innerHTML = `
-                        <td>Personnalisé</td>
-                        <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
-                        <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
-                    `;
-        } else {
-          tr.innerHTML = `
-                        <td><strong>${a.nom}</strong> <span class="custom-badge">Custom</span></td>
-                        <td class="price cell-clickable" data-price-cell data-cat="custom" data-index="${a.id}" data-field="prix" data-nom="${a.nom}" data-prix="${a.prix}">${a.prix}</td>
-                    `;
-        }
-        tbody.appendChild(tr);
-      });
-    }
+      tbody.appendChild(tr);
+    });
 
     table.appendChild(tbody);
     tableResponsive.appendChild(table);
