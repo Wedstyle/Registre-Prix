@@ -9,7 +9,7 @@
       rel="stylesheet"
     />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link rel="stylesheet" href="style.css?v=8001" />
+    <link rel="stylesheet" href="style.css?v=8003" />
   </head>
   <body>
     <nav class="main-nav">
@@ -243,6 +243,9 @@
               placeholder="🔍 Rechercher..."
               class="stock-search"
             />
+            <button id="btnAddCategorie" class="btn-toolbar">
+              ➕ Ajouter une catégorie
+            </button>
           </div>
           <div id="stockContent">Chargement...</div>
         </div>
@@ -329,6 +332,22 @@
                 <label>Position dans le tableau</label>
                 <select id="addArtPosition"></select>
               </div>
+              <div class="form-group">
+                <label>Matériau (optionnel)</label>
+                <select id="addArtMateriau">
+                  <option value="">— Aucun —</option>
+                </select>
+              </div>
+              <div style="display: flex; gap: 0.5rem">
+                <div class="form-group" style="flex: 1">
+                  <label>Prix</label>
+                  <input type="text" id="addArtPrix" placeholder="Ex: 150" />
+                </div>
+                <div class="form-group" style="flex: 1">
+                  <label>Stock initial</label>
+                  <input type="number" id="addArtStock" min="0" value="0" />
+                </div>
+              </div>
               <div class="form-actions">
                 <button
                   type="button"
@@ -343,46 +362,58 @@
           </div>
         </div>
 
-        <!-- Modal : Gérer -->
-        <div id="modalManage" class="modal-overlay hidden">
-          <div class="modal-content modal-large">
-            <button class="modal-close" onclick="fermerModal('modalManage')">
+        <!-- Modal : Ajouter une catégorie -->
+        <div id="modalAddCat" class="modal-overlay hidden">
+          <div class="modal-content">
+            <button class="modal-close" onclick="fermerModal('modalAddCat')">
               ✕
             </button>
-            <h2 class="modal-title">⚙️ Gérer</h2>
-            <p
-              style="
-                color: var(--text-muted);
-                font-size: 0.85rem;
-                text-align: center;
-                margin-bottom: 1.5rem;
-              "
-            >
-              Catégorie :
-              <strong id="modalManageCat" style="color: var(--accent)"></strong>
-            </p>
-            <h3
-              style="
-                color: var(--accent);
-                font-family: var(--font-title);
-                font-size: 1rem;
-                margin-bottom: 0.75rem;
-              "
-            >
-              📊 Colonnes (matériaux)
-            </h3>
-            <div id="manageColonnes" style="margin-bottom: 2rem"></div>
-            <h3
-              style="
-                color: var(--accent);
-                font-family: var(--font-title);
-                font-size: 1rem;
-                margin-bottom: 0.75rem;
-              "
-            >
-              📦 Lignes (articles)
-            </h3>
-            <div id="manageLignes"></div>
+            <h2 class="modal-title">➕ Ajouter une catégorie</h2>
+            <form id="formAddCat">
+              <div class="form-group">
+                <label>Nom de la catégorie</label>
+                <input
+                  type="text"
+                  id="addCatNom"
+                  required
+                  placeholder="Ex: Potions, Talismans, Reliques..."
+                />
+              </div>
+              <div class="form-group">
+                <label>Type</label>
+                <select
+                  id="addCatType"
+                  style="
+                    width: 100%;
+                    padding: 0.75rem 1rem;
+                    font-family: var(--font-body);
+                    font-size: 1rem;
+                    color: var(--text-main);
+                    background-color: var(--bg-header);
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    outline: none;
+                  "
+                >
+                  <option value="simple">
+                    Simple (1 seule colonne "Prix")
+                  </option>
+                  <option value="multi">
+                    Multi-matériaux (comme Armes/Armures)
+                  </option>
+                </select>
+              </div>
+              <div class="form-actions">
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  onclick="fermerModal('modalAddCat')"
+                >
+                  Annuler
+                </button>
+                <button type="submit" class="btn-primary">Créer</button>
+              </div>
+            </form>
           </div>
         </div>
 

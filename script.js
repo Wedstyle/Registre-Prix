@@ -11,7 +11,7 @@ const supabaseClient = window.supabase.createClient(
 );
 const DOMAINE_INTERNE = _0x1a[2];
 
-const CATEGORIES = [
+const CATEGORIES_BASE = [
   { key: "nourriture", titre: "Nourriture & Boissons", type: "simple" },
   { key: "sacs", titre: "Sacs & Sacoches", type: "simple" },
   { key: "vetements", titre: "Tenues & Vêtements", type: "simple" },
@@ -22,6 +22,7 @@ const CATEGORIES = [
   { key: "bijoux", titre: "Bijoux & Joaillerie", type: "simple" },
   { key: "outils", titre: "Capes, Accessoires & Outils", type: "simple" },
 ];
+let CATEGORIES = [...CATEGORIES_BASE];
 
 let panier = [];
 let materiauxParCat = {};
@@ -128,6 +129,8 @@ async function initAuth() {
   });
   const ss = document.getElementById("stockSearch");
   if (ss) ss.addEventListener("input", filtrerStock);
+  const bcat = document.getElementById("btnAddCategorie");
+  if (bcat) bcat.addEventListener("click", ouvrirModalAddCat);
   const vv = document.getElementById("validerVente");
   if (vv) vv.addEventListener("click", validerVente);
   const ri = document.getElementById("remiseInput");
@@ -387,7 +390,46 @@ async function deconnexion() {
   if (typeof mettreAJourPanierUI === "function") mettreAJourPanierUI();
 }
 
+async function chargerCategoriesCustom() {
+  try {
+    const { data } = await supabaseClient
+      .from("custom_categories")
+      .select("*")
+      .order("ordre", { ascending: true });
+    const customs = (data || []).map((c) => ({
+      key: c.key,
+      titre: c.titre,
+      type: c.type,
+      custom: true,
+      id: c.id,
+      ordre: c.ordre,
+    }));
+    CATEGORIES = [...CATEGORIES_BASE, ...customs];
+  } catch (e) {
+    CATEGORIES = [...CATEGORIES_BASE];
+  }
+}
+
+async function assurerMateriauxStandards() {
+  for (const cat of CATEGORIES) {
+    if (cat.type === "simple") {
+      const existing = materiauxParCat[cat.key] || [];
+      if (existing.length === 0) {
+        const { data } = await supabaseClient
+          .from("materiaux")
+          .insert({ categorie: cat.key, nom: "Prix", ordre: 0 })
+          .select()
+          .single();
+        if (data) {
+          materiauxParCat[cat.key] = [data];
+        }
+      }
+    }
+  }
+}
+
 async function chargerTout() {
+  await chargerCategoriesCustom();
   const [resMat, resArt, resPrix, resStock] = await Promise.all([
     supabaseClient
       .from("materiaux")
@@ -426,6 +468,9 @@ async function chargerTout() {
       id: s.id,
     };
   });
+
+  // Créer automatiquement les matériaux "Prix" pour les catégories simples
+  await assurerMateriauxStandards();
 }
 
 function ecouterChangementsTempsReel() {
@@ -462,6 +507,17 @@ function ecouterChangementsTempsReel() {
           renderAllSections();
           mettreAJourPanierUI();
         }),
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "custom_categories" },
+      () => {
+        chargerTout().then(() => {
+          renderTabs();
+          renderAllSections();
+          renderAdmin();
+        });
+      },
     )
     .on(
       "postgres_changes",
@@ -562,6 +618,17 @@ function renderAllSections() {
     const materiaux = materiauxParCat[key] || [];
     const articles = articlesParCat[key] || [];
 
+    if (materiaux.length === 0 && articles.length === 0) {
+      const empty = document.createElement("p");
+      empty.style.cssText =
+        "text-align:center;color:var(--text-muted);font-style:italic;padding:2rem;";
+      empty.textContent =
+        "Aucun article dans cette catégorie. Ajoutez-en depuis l'administration.";
+      section.appendChild(empty);
+      mainContent.appendChild(section);
+      return;
+    }
+
     const tableResponsive = document.createElement("div");
     tableResponsive.className = "table-responsive";
     const table = document.createElement("table");
@@ -570,7 +637,7 @@ function renderAllSections() {
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
     const thType = document.createElement("th");
-    thType.textContent = "TYPE";
+    thType.textContent = type === "multi" ? "TYPE" : "ARTICLE";
     trHead.appendChild(thType);
 
     materiaux.forEach((m) => {
@@ -698,17 +765,18 @@ function setupEditToolbar() {
 }
 
 // =========================================================
-// ADMIN - Vue unifiée avec boutons inline
+// ADMIN
 // =========================================================
 function renderAdmin() {
   const container = document.getElementById("stockContent");
   if (!container) return;
   container.innerHTML = "";
 
-  CATEGORIES.forEach(({ key, titre }) => {
+  CATEGORIES.forEach(({ key, titre, custom, id: catId }) => {
     const materiaux = materiauxParCat[key] || [];
     const articles = articlesParCat[key] || [];
     const isMulti = key === "armes" || key === "armures";
+    const estCustom = custom === true;
 
     const catDiv = document.createElement("div");
     catDiv.className = "stock-categorie";
@@ -718,9 +786,10 @@ function renderAdmin() {
     header.style.cursor = "pointer";
     header.style.userSelect = "none";
     header.innerHTML = `
-            <span class="stock-categorie-titre">
-                <span class="toggle-icon" style="display:inline-block;width:1em;transition:transform 0.2s;margin-right:0.5rem;">▶</span>
+            <span class="stock-categorie-titre" style="display:flex;align-items:center;gap:0.5rem;">
+                <span class="toggle-icon" style="display:inline-block;width:1em;transition:transform 0.2s;">▶</span>
                 ${titre}
+                ${estCustom ? `<button class="btn-mini btn-danger" data-action="delete-cat" data-cat="${key}" data-cat-id="${catId}" data-nom="${titre}" title="Supprimer la catégorie">🗑️</button>` : ""}
             </span>
             <span class="stock-categorie-stats">${materiaux.length} colonnes · ${articles.length} articles</span>
         `;
@@ -729,7 +798,7 @@ function renderAdmin() {
     body.className = "stock-categorie-body hidden";
     body.style.padding = "1rem";
 
-    // === Boutons d'ajout ===
+    // Boutons d'action
     const toolbar = document.createElement("div");
     toolbar.style.cssText =
       "display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);";
@@ -741,7 +810,7 @@ function renderAdmin() {
     toolbar.innerHTML = toolbarHtml;
     body.appendChild(toolbar);
 
-    // === Section Matériaux (uniquement armes/armures) ===
+    // Matériaux
     if (isMulti && materiaux.length > 0) {
       const matTitle = document.createElement("div");
       matTitle.style.cssText =
@@ -765,7 +834,7 @@ function renderAdmin() {
       });
     }
 
-    // === Section Articles + Stocks ===
+    // Articles + stocks
     if (articles.length > 0) {
       const artTitle = document.createElement("div");
       artTitle.style.cssText =
@@ -782,7 +851,6 @@ function renderAdmin() {
       body.appendChild(empty);
     } else {
       articles.forEach((a, artIdx) => {
-        // En-tête de l'article avec boutons
         const artHeader = document.createElement("div");
         artHeader.style.cssText =
           "display: flex; justify-content: space-between; align-items: center; background: rgba(245, 158, 11, 0.08); padding: 0.6rem 0.85rem; border-radius: 8px; margin-top: 0.85rem; margin-bottom: 0.35rem; gap: 0.5rem; flex-wrap: wrap;";
@@ -797,7 +865,6 @@ function renderAdmin() {
                 `;
         body.appendChild(artHeader);
 
-        // Stock inputs par matériau
         materiaux.forEach((m) => {
           const key2 = `${a.id}:${m.id}`;
           const st = stockData[key2] || { quantite: 0, seuil: 5 };
@@ -833,8 +900,8 @@ function renderAdmin() {
       });
     }
 
-    // Toggle
-    header.addEventListener("click", () => {
+    header.addEventListener("click", (e) => {
+      if (e.target.classList.contains("btn-mini")) return;
       const isHidden = body.classList.contains("hidden");
       body.classList.toggle("hidden");
       const icon = header.querySelector(".toggle-icon");
@@ -857,9 +924,11 @@ function renderAdmin() {
       const nom = e.currentTarget.dataset.nom;
       const cat = e.currentTarget.dataset.cat;
       const titre = e.currentTarget.dataset.titre;
+      const catId = e.currentTarget.dataset.catId;
 
       if (action === "add-mat") return ouvrirModalAddMat(cat, titre);
       if (action === "add-art") return ouvrirModalAddArt(cat, titre);
+      if (action === "delete-cat") return supprimerCategorie(cat, catId, nom);
 
       await executerActionDirecte(type, action, id, nom);
     });
@@ -898,14 +967,50 @@ function renderAdmin() {
   });
 }
 
-// =========================================================
-// Actions directes (renommer, monter, descendre, supprimer)
-// =========================================================
+async function supprimerCategorie(catKey, catId, nom) {
+  if (
+    !confirm(
+      `⚠️ Supprimer la catégorie "${nom}" ?\n\nTous ses articles, prix et stocks seront supprimés.`,
+    )
+  )
+    return;
+  if (!confirm("Confirmer définitivement ?")) return;
+
+  const articles = articlesParCat[catKey] || [];
+  const materiaux = materiauxParCat[catKey] || [];
+
+  for (const a of articles) {
+    for (const m of materiaux) {
+      await supabaseClient
+        .from("stock")
+        .delete()
+        .eq("item_index", a.id)
+        .eq("champ", String(m.id));
+      await supabaseClient
+        .from("prix_articles")
+        .delete()
+        .eq("article_id", a.id)
+        .eq("materiau_id", m.id);
+    }
+  }
+  await supabaseClient.from("articles").delete().eq("categorie", catKey);
+  await supabaseClient.from("materiaux").delete().eq("categorie", catKey);
+  await supabaseClient
+    .from("custom_categories")
+    .delete()
+    .eq("id", parseInt(catId));
+
+  await chargerTout();
+  renderTabs();
+  renderAllSections();
+  renderAdmin();
+  afficherToast("✅ Catégorie supprimée", "success");
+}
+
 async function executerActionDirecte(type, action, id, nom) {
   const idNum = parseInt(id);
   const table = type === "mat" ? "materiaux" : "articles";
 
-  // Trouver la catégorie et l'index
   let cat = null;
   let list = null;
   if (type === "mat") {
@@ -979,7 +1084,7 @@ async function executerActionDirecte(type, action, id, nom) {
 }
 
 // =========================================================
-// MODALS (ajout seulement)
+// MODALS
 // =========================================================
 function fermerModal(id) {
   document.getElementById(id).classList.add("hidden");
@@ -1019,6 +1124,8 @@ function ouvrirModalAddArt(cat, titre) {
   _modalTitre = titre;
   document.getElementById("modalAddArtCat").textContent = titre;
   document.getElementById("addArtNom").value = "";
+  document.getElementById("addArtPrix").value = "";
+  document.getElementById("addArtStock").value = "0";
 
   const select = document.getElementById("addArtPosition");
   select.innerHTML = '<option value="end">À la fin</option>';
@@ -1036,8 +1143,40 @@ function ouvrirModalAddArt(cat, titre) {
     select.appendChild(opt);
   });
 
+  // Remplir le select des matériaux
+  const matSelect = document.getElementById("addArtMateriau");
+  matSelect.innerHTML = '<option value="">— Aucun —</option>';
+  const materiaux = materiauxParCat[cat] || [];
+  materiaux.forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.nom;
+    matSelect.appendChild(opt);
+  });
+
   document.getElementById("modalAddArt").classList.remove("hidden");
   setTimeout(() => document.getElementById("addArtNom").focus(), 100);
+}
+
+function ouvrirModalAddCat() {
+  document.getElementById("addCatNom").value = "";
+  document.getElementById("addCatType").value = "simple";
+  document.getElementById("modalAddCat").classList.remove("hidden");
+  setTimeout(() => document.getElementById("addCatNom").focus(), 100);
+}
+
+function genererKey(titre) {
+  return (
+    titre
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "") +
+    "_" +
+    Date.now().toString(36)
+  );
 }
 
 function setupFormsAdmin() {
@@ -1085,6 +1224,10 @@ function setupFormsAdmin() {
     formArt.addEventListener("submit", async (e) => {
       e.preventDefault();
       const nom = document.getElementById("addArtNom").value.trim();
+      const materiauId = document.getElementById("addArtMateriau").value;
+      const prix = document.getElementById("addArtPrix").value.trim();
+      const stockInit =
+        parseInt(document.getElementById("addArtStock").value) || 0;
       if (!nom) return;
 
       const position = document.getElementById("addArtPosition").value;
@@ -1102,16 +1245,78 @@ function setupFormsAdmin() {
         else ordre = prevOrdre + 0.5;
       }
 
-      const { error } = await supabaseClient
+      const { data: newArticle, error } = await supabaseClient
         .from("articles")
-        .insert({ categorie: _modalCat, nom, ordre });
+        .insert({ categorie: _modalCat, nom, ordre })
+        .select()
+        .single();
       if (error) {
         afficherToast("Erreur : " + error.message, "error");
         return;
       }
 
+      // Si un matériau est sélectionné et un prix fourni → créer le prix
+      if (materiauId && prix) {
+        await supabaseClient.from("prix_articles").insert({
+          article_id: newArticle.id,
+          materiau_id: parseInt(materiauId),
+          prix: prix,
+        });
+      }
+
+      // Si un matériau est sélectionné et un stock initial fourni → créer le stock
+      if (materiauId && stockInit > 0) {
+        await supabaseClient.from("stock").upsert(
+          {
+            categorie: "",
+            item_index: newArticle.id,
+            champ: String(materiauId),
+            item_nom: "",
+            quantite: stockInit,
+            seuil_alerte: 5,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "categorie,item_index,champ" },
+        );
+      }
+
       fermerModal("modalAddArt");
       afficherToast("✅ Article ajouté", "success");
+      await chargerTout();
+      renderTabs();
+      renderAllSections();
+      renderAdmin();
+    });
+  }
+
+  const formCat = document.getElementById("formAddCat");
+  if (formCat) {
+    formCat.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const titre = document.getElementById("addCatNom").value.trim();
+      const type = document.getElementById("addCatType").value;
+      if (!titre) return;
+
+      const key = genererKey(titre);
+      const ordre = CATEGORIES.length;
+
+      const { error } = await supabaseClient
+        .from("custom_categories")
+        .insert({ key, titre, type, ordre });
+      if (error) {
+        afficherToast("Erreur : " + error.message, "error");
+        return;
+      }
+
+      // Si catégorie simple, créer un matériau "Prix" par défaut
+      if (type === "simple") {
+        await supabaseClient
+          .from("materiaux")
+          .insert({ categorie: key, nom: "Prix", ordre: 0 });
+      }
+
+      fermerModal("modalAddCat");
+      afficherToast('✅ Catégorie "' + titre + '" créée', "success");
       await chargerTout();
       renderTabs();
       renderAllSections();
