@@ -33,12 +33,24 @@ let editMode = false;
 let utilisateurCourant = null;
 let remisePourcent = 0;
 
-// Changements de prix en attente d'enregistrement
 let pendingChanges = {};
 
-// Comptabilité
 let comptaFilter = "all";
 let _comptaCache = [];
+
+// =========================================================
+// HELPERS NUMÉRIQUES (décimales)
+// =========================================================
+function arrondir2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+function formatSeptims(n) {
+  return Number(n).toLocaleString("fr-FR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  });
+}
 
 function afficherToast(message, type = "info", duree = 3000) {
   const existing = document.querySelector(".toast");
@@ -707,9 +719,6 @@ function reRenderSection(cat) {
   renderAllSections();
 }
 
-// =========================================================
-// MODE ÉDITION (avec enregistrement groupé)
-// =========================================================
 function toggleEditMode() {
   if (editMode && Object.keys(pendingChanges).length > 0) {
     const nb = Object.keys(pendingChanges).length;
@@ -923,9 +932,6 @@ function annulerTousLesPrix(silencieux = false) {
   if (!silencieux) afficherToast("↩️ Modifications annulées", "info");
 }
 
-// =========================================================
-// ADMIN
-// =========================================================
 function renderAdmin() {
   const container = document.getElementById("stockContent");
   if (!container) return;
@@ -1237,9 +1243,6 @@ async function executerActionDirecte(type, action, id, nom) {
   afficherToast("✅ Modifié", "success");
 }
 
-// =========================================================
-// MODALS
-// =========================================================
 function fermerModal(id) {
   document.getElementById(id).classList.add("hidden");
 }
@@ -1563,18 +1566,18 @@ function setupPanier() {
 }
 
 function extrairePrix(prixTexte) {
-  if (typeof prixTexte === "number") return Math.round(prixTexte);
+  if (typeof prixTexte === "number") return arrondir2(prixTexte);
   if (typeof prixTexte === "string") {
     const clean = prixTexte.replace(",", ".");
     const m = clean.match(/\d+(\.\d+)?/);
-    return m ? Math.round(parseFloat(m[0])) : 0;
+    return m ? arrondir2(parseFloat(m[0])) : 0;
   }
   return 0;
 }
 
 function ajouterAuPanier(nom, prixTexte, details = "", key = null) {
   const prix = extrairePrix(prixTexte);
-  if (prix === 0) return;
+  if (prix <= 0) return;
   const nomComplet = details ? `${nom} (${details})` : nom;
   const ex = panier.find(
     (i) =>
@@ -1618,8 +1621,8 @@ function mettreAJourPanierUI() {
     if (remiseInfo) remiseInfo.style.display = "none";
   } else {
     panier.forEach((item, index) => {
-      const st = item.prixUnitaire * item.quantite;
-      totalAvantRemise += st;
+      const st = arrondir2(item.prixUnitaire * item.quantite);
+      totalAvantRemise = arrondir2(totalAvantRemise + st);
       count += item.quantite;
       let stockInfo = "";
       if (item.articleId && item.materiauId) {
@@ -1640,25 +1643,25 @@ function mettreAJourPanierUI() {
       li.innerHTML = `
                 <div class="item-info">
                     <span class="item-nom">${item.nom}</span>
-                    <span class="item-details">${item.prixUnitaire} S × ${item.quantite}</span>
+                    <span class="item-details">${formatSeptims(item.prixUnitaire)} S × ${item.quantite}</span>
                     ${stockInfo}
                 </div>
                 <div class="item-action">
-                    <span class="item-prix">${st} S</span>
+                    <span class="item-prix">${formatSeptims(st)} S</span>
                     <button class="btn-remove-item" data-index="${index}">✕</button>
                 </div>`;
       list.appendChild(li);
     });
     if (btnValider) btnValider.disabled = false;
   }
-  const montantRemise = Math.round(totalAvantRemise * (remisePourcent / 100));
-  const totalFinal = totalAvantRemise - montantRemise;
-  if (totalSpan) totalSpan.textContent = totalFinal;
+  const montantRemise = arrondir2(totalAvantRemise * (remisePourcent / 100));
+  const totalFinal = arrondir2(totalAvantRemise - montantRemise);
+  if (totalSpan) totalSpan.textContent = formatSeptims(totalFinal);
   if (badge) badge.textContent = count;
   if (remiseInfo) {
     if (remisePourcent > 0 && totalAvantRemise > 0) {
       remiseInfo.style.display = "block";
-      remiseInfo.textContent = `(-${montantRemise} S)`;
+      remiseInfo.textContent = `(-${formatSeptims(montantRemise)} S)`;
     } else remiseInfo.style.display = "none";
   }
   list.querySelectorAll(".btn-remove-item").forEach((btn) => {
@@ -1732,12 +1735,15 @@ async function validerVente() {
     idx: i.articleId,
     champ: String(i.materiauId),
   }));
-  const totalAvantRemise = panier.reduce(
-    (s, i) => s + i.prixUnitaire * i.quantite,
-    0,
-  );
-  const montantRemise = Math.round(totalAvantRemise * (remisePourcent / 100));
-  const totalFinal = totalAvantRemise - montantRemise;
+
+  let totalAvantRemise = 0;
+  panier.forEach((i) => {
+    totalAvantRemise = arrondir2(
+      totalAvantRemise + i.prixUnitaire * i.quantite,
+    );
+  });
+  const montantRemise = arrondir2(totalAvantRemise * (remisePourcent / 100));
+  const totalFinal = arrondir2(totalAvantRemise - montantRemise);
 
   const { error } = await supabaseClient.rpc("valider_vente", {
     p_employee_id: utilisateurCourant.id,
@@ -1757,7 +1763,7 @@ async function validerVente() {
     return;
   }
 
-  afficherToast(`✅ Vente : ${totalFinal} S`, "success", 4000);
+  afficherToast(`✅ Vente : ${formatSeptims(totalFinal)} S`, "success", 4000);
   panier = [];
   remisePourcent = 0;
   const ri = document.getElementById("remiseInput");
@@ -1885,18 +1891,22 @@ function exporterComptabiliteCSV() {
     return;
   }
   const escapeCSV = (v) => `"${String(v || "").replace(/"/g, '""')}"`;
-  let csv = "\uFEFFDate;Employé;Articles;Total\n";
+  let csv = "\uFEFFDate;Employé;Articles;Total;Remise;Avant remise\n";
   window._comptaSales.forEach((s) => {
     const date = new Date(s.created_at)
       .toLocaleString("fr-FR")
       .replace(/,/g, "");
     const items = (s.items || []).map((i) => `${i.qte}x ${i.nom}`).join(" | ");
+    const remise = Number(s.remise_pourcent || 0);
+    const avantRemise = Number(s.total_avant_remise || s.total);
     csv +=
       [
         escapeCSV(date),
         escapeCSV(s.employee_nom),
         escapeCSV(items),
         escapeCSV(s.total),
+        escapeCSV(remise > 0 ? remise + "%" : ""),
+        escapeCSV(remise > 0 ? avantRemise : ""),
       ].join(";") + "\n";
   });
   const a = document.createElement("a");
@@ -2029,18 +2039,32 @@ function renderComptaData() {
     return;
   }
 
-  const caTotal = ventesFiltrees.reduce((s, v) => s + Number(v.total), 0);
+  let caTotal = 0;
+  ventesFiltrees.forEach((v) => {
+    caTotal = arrondir2(caTotal + Number(v.total));
+  });
   const nbVentes = ventesFiltrees.length;
-  const panierMoyen = Math.round(caTotal / nbVentes);
+  const panierMoyen = arrondir2(caTotal / nbVentes);
+
+  const ventesAvecRemise = ventesFiltrees.filter(
+    (s) => Number(s.remise_pourcent) > 0,
+  );
+  const nbRemises = ventesAvecRemise.length;
+  let totalRemises = 0;
+  ventesAvecRemise.forEach((s) => {
+    const avant = Number(s.total_avant_remise || s.total);
+    const apres = Number(s.total);
+    totalRemises = arrondir2(totalRemises + (avant - apres));
+  });
 
   const ventesPrecedentes = getVentesPeriodePrecedente(
     _comptaCache,
     comptaFilter,
   );
-  const caPrecedent = ventesPrecedentes.reduce(
-    (s, v) => s + Number(v.total),
-    0,
-  );
+  let caPrecedent = 0;
+  ventesPrecedentes.forEach((v) => {
+    caPrecedent = arrondir2(caPrecedent + Number(v.total));
+  });
 
   let evolution = 0;
   let badgeClass = "neutral";
@@ -2060,7 +2084,7 @@ function renderComptaData() {
     const d = new Date(s.created_at);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     if (!parJour[key]) parJour[key] = { ca: 0, ventes: 0, date: d };
-    parJour[key].ca += Number(s.total);
+    parJour[key].ca = arrondir2(parJour[key].ca + Number(s.total));
     parJour[key].ventes++;
   });
   const joursTries = Object.values(parJour)
@@ -2074,7 +2098,9 @@ function renderComptaData() {
       const key = item.nom;
       if (!topArticles[key]) topArticles[key] = { qte: 0, ca: 0 };
       topArticles[key].qte += item.qte || 1;
-      topArticles[key].ca += (item.prix || 0) * (item.qte || 1);
+      topArticles[key].ca = arrondir2(
+        topArticles[key].ca + (item.prix || 0) * (item.qte || 1),
+      );
     });
   });
   const topArticlesArray = Object.entries(topArticles)
@@ -2087,7 +2113,7 @@ function renderComptaData() {
     const nom = s.employee_nom || "?";
     if (!parEmploye[nom]) parEmploye[nom] = { ventes: [], ca: 0 };
     parEmploye[nom].ventes.push(s);
-    parEmploye[nom].ca += Number(s.total);
+    parEmploye[nom].ca = arrondir2(parEmploye[nom].ca + Number(s.total));
   });
   const employesTries = Object.entries(parEmploye).sort(
     (a, b) => b[1].ca - a[1].ca,
@@ -2100,13 +2126,13 @@ function renderComptaData() {
       <div class="stat-card">
         <div class="stat-card-title">💰 Chiffre d'affaires</div>
         <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: var(--accent); line-height: 1;">
-          ${caTotal.toLocaleString("fr-FR")} S
+          ${formatSeptims(caTotal)} S
         </div>
         <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
           ${
             comptaFilter === "all"
               ? `${ventesFiltrees.length} vente(s) au total`
-              : `vs ${caPrecedent.toLocaleString("fr-FR")} S période préc.`
+              : `vs ${formatSeptims(caPrecedent)} S période préc.`
           }
           <span class="stat-badge ${badgeClass}">${badgeText}</span>
         </div>
@@ -2123,10 +2149,19 @@ function renderComptaData() {
       <div class="stat-card">
         <div class="stat-card-title">🎯 Panier moyen</div>
         <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: var(--accent); line-height: 1;">
-          ${panierMoyen.toLocaleString("fr-FR")} S
+          ${formatSeptims(panierMoyen)} S
         </div>
         <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
           par transaction
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-title">🏷️ Remises accordées</div>
+        <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: #ef4444; line-height: 1;">
+          -${formatSeptims(totalRemises)} S
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+          ${nbRemises} vente(s) avec remise
         </div>
       </div>
     </div>
@@ -2155,7 +2190,7 @@ function renderComptaData() {
                 <div class="jour-date">${jour}<small>${annee}</small></div>
                 <div class="jour-bar-container"><div class="jour-bar" style="width: ${pourcentage}%"></div></div>
                 <div class="jour-ventes">${j.ventes}</div>
-                <div class="jour-total">${j.ca.toLocaleString("fr-FR")} S</div>
+                <div class="jour-total">${formatSeptims(j.ca)} S</div>
               </div>
             `;
           })
@@ -2175,7 +2210,7 @@ function renderComptaData() {
                   (a, i) => `
               <div class="stat-ligne">
                 <span class="stat-ligne-nom">${i + 1}. ${a.nom}</span>
-                <span class="stat-ligne-valeur">${a.ca.toLocaleString("fr-FR")} S <small style="color: var(--text-muted); font-weight: 400;">×${a.qte}</small></span>
+                <span class="stat-ligne-valeur">${formatSeptims(a.ca)} S <small style="color: var(--text-muted); font-weight: 400;">×${a.qte}</small></span>
               </div>
             `,
                 )
@@ -2190,7 +2225,7 @@ function renderComptaData() {
             ([nom, d]) => `
           <div class="stat-ligne">
             <span class="stat-ligne-nom">${nom}</span>
-            <span class="stat-ligne-valeur">${d.ca.toLocaleString("fr-FR")} S <small style="color: var(--text-muted); font-weight: 400;">(${d.ventes.length})</small></span>
+            <span class="stat-ligne-valeur">${formatSeptims(d.ca)} S <small style="color: var(--text-muted); font-weight: 400;">(${d.ventes.length})</small></span>
           </div>
         `,
           )
@@ -2216,14 +2251,19 @@ function renderComptaData() {
                   const items = (s.items || [])
                     .map((i) => `${i.qte}× ${i.nom}`)
                     .join(", ");
-                  return `<tr><td style="font-size:0.75rem;">${date}</td><td style="font-size:0.8rem;">${items}</td><td style="color:var(--accent);font-weight:700;white-space:nowrap;">${s.total} S</td></tr>`;
+                  const remise = Number(s.remise_pourcent || 0);
+                  const badgeRemise =
+                    remise > 0
+                      ? `<span class="stat-badge down" style="margin-left:6px;">-${remise}%</span>`
+                      : "";
+                  return `<tr><td style="font-size:0.75rem;">${date}</td><td style="font-size:0.8rem;">${items}</td><td style="color:var(--accent);font-weight:700;white-space:nowrap;text-align:right;">${formatSeptims(s.total)} S ${badgeRemise}</td></tr>`;
                 })
                 .join("");
               return `
                 <tr class="compta-employe-row" data-employe-idx="${idx}">
                   <td><span class="employe-expand-icon">▶</span> <strong>${nom}</strong></td>
                   <td>${d.ventes.length}</td>
-                  <td style="color:var(--accent);font-weight:700;">${d.ca.toLocaleString("fr-FR")} S</td>
+                  <td style="color:var(--accent);font-weight:700;">${formatSeptims(d.ca)} S</td>
                 </tr>
                 <tr class="employe-detail-row hidden" data-detail-idx="${idx}">
                   <td colspan="3">
@@ -2256,7 +2296,17 @@ function renderComptaData() {
               const items = (s.items || [])
                 .map((i) => `${i.qte}× ${i.nom}`)
                 .join(", ");
-              return `<tr><td style="font-size:0.8rem;white-space:nowrap;">${date}</td><td><strong>${s.employee_nom}</strong></td><td style="font-size:0.8rem;color:var(--text-muted);">${items}</td><td style="color:var(--accent);font-weight:700;white-space:nowrap;">${s.total} S</td></tr>`;
+              const remise = Number(s.remise_pourcent || 0);
+              const avantRemise = Number(s.total_avant_remise || s.total);
+              const badgeRemise =
+                remise > 0
+                  ? `<span class="stat-badge down" style="margin-left:6px;">-${remise}%</span>`
+                  : "";
+              const detailPrix =
+                remise > 0
+                  ? `<div style="font-size:0.7rem;color:var(--text-muted);text-decoration:line-through;">${formatSeptims(avantRemise)} S</div>`
+                  : "";
+              return `<tr><td style="font-size:0.8rem;white-space:nowrap;">${date}</td><td><strong>${s.employee_nom}</strong></td><td style="font-size:0.8rem;color:var(--text-muted);">${items}</td><td style="color:var(--accent);font-weight:700;white-space:nowrap;text-align:right;">${detailPrix}${formatSeptims(s.total)} S ${badgeRemise}</td></tr>`;
             })
             .join("")}
         </tbody>
@@ -2279,9 +2329,6 @@ function renderComptaData() {
   });
 }
 
-// =========================================================
-// TABLEAU DE BORD
-// =========================================================
 async function chargerDashboard() {
   const container = document.getElementById("dashboardContent");
   if (!container) return;
@@ -2312,10 +2359,16 @@ async function chargerDashboard() {
     return d >= debutHier && d < finHier;
   });
 
-  const caJour = ventesJour.reduce((sum, s) => sum + Number(s.total), 0);
-  const caHier = ventesHier.reduce((sum, s) => sum + Number(s.total), 0);
+  let caJour = 0;
+  ventesJour.forEach((s) => {
+    caJour = arrondir2(caJour + Number(s.total));
+  });
+  let caHier = 0;
+  ventesHier.forEach((s) => {
+    caHier = arrondir2(caHier + Number(s.total));
+  });
   const nbVentesJour = ventesJour.length;
-  const panierMoyen = nbVentesJour > 0 ? Math.round(caJour / nbVentesJour) : 0;
+  const panierMoyen = nbVentesJour > 0 ? arrondir2(caJour / nbVentesJour) : 0;
 
   let evolBadge = "";
   if (caHier > 0) {
@@ -2333,7 +2386,9 @@ async function chargerDashboard() {
       const key = item.nom;
       if (!topArticles[key]) topArticles[key] = { qte: 0, ca: 0 };
       topArticles[key].qte += item.qte || 1;
-      topArticles[key].ca += (item.prix || 0) * (item.qte || 1);
+      topArticles[key].ca = arrondir2(
+        topArticles[key].ca + (item.prix || 0) * (item.qte || 1),
+      );
     });
   });
   const topArray = Object.entries(topArticles)
@@ -2373,7 +2428,7 @@ async function chargerDashboard() {
     const nom = s.employee_nom || "?";
     if (!parEmploye[nom]) parEmploye[nom] = { ventes: 0, ca: 0 };
     parEmploye[nom].ventes++;
-    parEmploye[nom].ca += Number(s.total);
+    parEmploye[nom].ca = arrondir2(parEmploye[nom].ca + Number(s.total));
   });
   const employesTries = Object.entries(parEmploye).sort(
     (a, b) => b[1].ca - a[1].ca,
@@ -2387,7 +2442,7 @@ async function chargerDashboard() {
     <div class="dash-top">
       <div class="dash-card highlight">
         <span class="dash-card-label">💰 CA du jour</span>
-        <span class="dash-card-value">${caJour.toLocaleString("fr-FR")} S</span>
+        <span class="dash-card-value">${formatSeptims(caJour)} S</span>
         <span class="dash-card-sub">${nbVentesJour} vente(s) ${evolBadge}</span>
       </div>
       <div class="dash-card">
@@ -2397,12 +2452,12 @@ async function chargerDashboard() {
       </div>
       <div class="dash-card">
         <span class="dash-card-label">🎯 Panier moyen</span>
-        <span class="dash-card-value">${panierMoyen.toLocaleString("fr-FR")} S</span>
+        <span class="dash-card-value">${formatSeptims(panierMoyen)} S</span>
         <span class="dash-card-sub">par transaction</span>
       </div>
       <div class="dash-card">
         <span class="dash-card-label">📅 CA d'hier</span>
-        <span class="dash-card-value">${caHier.toLocaleString("fr-FR")} S</span>
+        <span class="dash-card-value">${formatSeptims(caHier)} S</span>
         <span class="dash-card-sub">${ventesHier.length} vente(s)</span>
       </div>
     </div>
@@ -2429,7 +2484,7 @@ async function chargerDashboard() {
                 <div class="dash-liste-item">
                   <span class="dash-item-rang ${rangClass}">${i + 1}</span>
                   <span class="dash-item-nom">${a.nom}</span>
-                  <span class="dash-item-val">${a.ca.toLocaleString("fr-FR")} S <small style="color:var(--text-muted);font-weight:400;">×${a.qte}</small></span>
+                  <span class="dash-item-val">${formatSeptims(a.ca)} S <small style="color:var(--text-muted);font-weight:400;">×${a.qte}</small></span>
                 </div>
               `;
               })
@@ -2486,7 +2541,7 @@ async function chargerDashboard() {
                 <div class="dash-liste-item">
                   <span class="dash-item-rang ${rangClass}">${i + 1}</span>
                   <span class="dash-item-nom">${nom}</span>
-                  <span class="dash-item-val">${d.ca.toLocaleString("fr-FR")} S <small style="color:var(--text-muted);font-weight:400;">(${d.ventes})</small></span>
+                  <span class="dash-item-val">${formatSeptims(d.ca)} S <small style="color:var(--text-muted);font-weight:400;">(${d.ventes})</small></span>
                 </div>
               `;
               })
@@ -2515,13 +2570,18 @@ async function chargerDashboard() {
                   0,
                 );
                 const detail = `${nbArticles} article${nbArticles > 1 ? "s" : ""}`;
+                const remise = Number(s.remise_pourcent || 0);
+                const badgeRemise =
+                  remise > 0
+                    ? ` <span class="stat-badge down" style="margin-left:4px;">-${remise}%</span>`
+                    : "";
                 return `
                 <div class="dash-vente-item">
                   <div class="dash-vente-info">
                     <span class="dash-vente-emp">${s.employee_nom}</span>
                     <span class="dash-vente-detail">${heure} · ${detail}</span>
                   </div>
-                  <span class="dash-vente-total">${s.total} S</span>
+                  <span class="dash-vente-total">${formatSeptims(s.total)} S${badgeRemise}</span>
                 </div>
               `;
               })
@@ -2536,9 +2596,6 @@ async function chargerDashboard() {
   container.innerHTML = html;
 }
 
-// =========================================================
-// INIT
-// =========================================================
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     await chargerTout();

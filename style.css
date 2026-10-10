@@ -2464,29 +2464,3 @@ body.edit-mode .cell-modified::before {
   color: var(--text-muted);
   opacity: 0.5;
 }
-#view-admin::before,
-#view-admin::after {
-  content: "";
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  width: 800px;
-  background-image: url("rug.png");
-  background-size: 100% 100%;
-  background-position: center;
-  background-repeat: no-repeat;
-  pointer-events: none;
-  z-index: 0;
-}
-
-#view-admin::before {
-  left: 0;
-}
-#view-admin::after {
-  right: 0;
-}
-
-#view-admin > .page-container {
-  position: relative;
-  z-index: 1;
-}
