@@ -33,6 +33,13 @@ let editMode = false;
 let utilisateurCourant = null;
 let remisePourcent = 0;
 
+// Changements de prix en attente d'enregistrement
+let pendingChanges = {};
+
+// Comptabilité
+let comptaFilter = "all";
+let _comptaCache = [];
+
 function afficherToast(message, type = "info", duree = 3000) {
   const existing = document.querySelector(".toast");
   if (existing) existing.remove();
@@ -469,7 +476,6 @@ async function chargerTout() {
     };
   });
 
-  // Créer automatiquement les matériaux "Prix" pour les catégories simples
   await assurerMateriauxStandards();
 }
 
@@ -506,6 +512,8 @@ function ecouterChangementsTempsReel() {
         chargerTout().then(() => {
           renderAllSections();
           mettreAJourPanierUI();
+          const cv = document.querySelector(".view.active");
+          if (cv && cv.id === "view-dashboard") chargerDashboard();
         }),
     )
     .on(
@@ -525,6 +533,11 @@ function ecouterChangementsTempsReel() {
       () => {
         const cv = document.querySelector(".view.active");
         if (cv && cv.id === "view-dashboard") chargerDashboard();
+        if (cv && cv.id === "view-admin") {
+          const panel = document.getElementById("adminComptabilite");
+          if (panel && !panel.classList.contains("hidden"))
+            chargerComptabilite();
+        }
       },
     )
     .on(
@@ -694,7 +707,25 @@ function reRenderSection(cat) {
   renderAllSections();
 }
 
+// =========================================================
+// MODE ÉDITION (avec enregistrement groupé)
+// =========================================================
 function toggleEditMode() {
+  if (editMode && Object.keys(pendingChanges).length > 0) {
+    const nb = Object.keys(pendingChanges).length;
+    const choix = confirm(
+      `Vous avez ${nb} prix modifié(s) non enregistré(s).\n\n` +
+        `OK = Enregistrer avant de quitter\n` +
+        `Annuler = Ignorer les modifications`,
+    );
+    if (choix) {
+      enregistrerTousLesPrix();
+      return;
+    } else {
+      annulerTousLesPrix(true);
+    }
+  }
+
   editMode = !editMode;
   document.body.classList.toggle("edit-mode", editMode);
   const btn = document.getElementById("editToggle");
@@ -706,62 +737,190 @@ function toggleEditMode() {
     cell.contentEditable = editMode ? "true" : "false";
     if (!editMode) cell.blur();
   });
+  mettreAJourBarreActions();
 }
 
 function setupEditToolbar() {
   const btn = document.getElementById("editToggle");
   if (btn) btn.addEventListener("click", toggleEditMode);
-  document.addEventListener("focusout", async (e) => {
+
+  creerBarreActions();
+
+  document.addEventListener("focusout", (e) => {
     const cell = e.target;
     if (!cell.hasAttribute || !cell.hasAttribute("data-price-cell")) return;
     if (!editMode) return;
+
     const articleId = parseInt(cell.dataset.articleId);
     const materiauId = parseInt(cell.dataset.materiauId);
     let newValue = (cell.textContent || "").replace(/\s+/g, " ").trim();
     if (!newValue) newValue = "-";
 
     const key = `${articleId}:${materiauId}`;
-    const existing = prixParCell[key];
+    const originalValue = prixParCell[key] || "-";
 
-    if (existing) {
-      await supabaseClient
-        .from("prix_articles")
-        .update({ prix: newValue })
-        .eq("article_id", articleId)
-        .eq("materiau_id", materiauId);
-    } else {
-      await supabaseClient
-        .from("prix_articles")
-        .insert({
+    if (newValue === originalValue) {
+      delete pendingChanges[key];
+      cell.classList.remove("cell-modified");
+      cell.dataset.prix = newValue;
+      mettreAJourBarreActions();
+      return;
+    }
+
+    pendingChanges[key] = {
+      articleId,
+      materiauId,
+      oldValue: originalValue,
+      newValue: newValue,
+    };
+    cell.dataset.prix = newValue;
+    cell.classList.add("cell-modified");
+    mettreAJourBarreActions();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const cell = e.target;
+    const isCell = cell.hasAttribute && cell.hasAttribute("data-price-cell");
+    if (isCell && editMode) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        cell.blur();
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        const key = `${cell.dataset.articleId}:${cell.dataset.materiauId}`;
+        const change = pendingChanges[key];
+        const restore = change ? change.oldValue : prixParCell[key] || "-";
+        cell.textContent = restore;
+        cell.dataset.prix = restore;
+        delete pendingChanges[key];
+        cell.classList.remove("cell-modified");
+        cell.blur();
+        mettreAJourBarreActions();
+      }
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && editMode) {
+      e.preventDefault();
+      if (Object.keys(pendingChanges).length > 0) enregistrerTousLesPrix();
+    }
+  });
+
+  window.addEventListener("beforeunload", (e) => {
+    if (Object.keys(pendingChanges).length > 0) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
+}
+
+function creerBarreActions() {
+  if (document.getElementById("editActionsBar")) return;
+  const bar = document.createElement("div");
+  bar.id = "editActionsBar";
+  bar.className = "edit-actions-bar";
+  bar.innerHTML = `
+    <span class="edit-actions-info">
+      <strong id="editActionsCount">0</strong> modification(s) en attente
+    </span>
+    <button id="editSaveBtn" class="btn-toolbar btn-save">💾 Enregistrer tout</button>
+    <button id="editCancelBtn" class="btn-toolbar btn-danger">↩️ Annuler</button>
+  `;
+  document.body.appendChild(bar);
+
+  document
+    .getElementById("editSaveBtn")
+    .addEventListener("click", enregistrerTousLesPrix);
+  document
+    .getElementById("editCancelBtn")
+    .addEventListener("click", () => annulerTousLesPrix(false));
+}
+
+function mettreAJourBarreActions() {
+  const bar = document.getElementById("editActionsBar");
+  if (!bar) return;
+  const nb = Object.keys(pendingChanges).length;
+  const cnt = document.getElementById("editActionsCount");
+  if (cnt) cnt.textContent = nb;
+  bar.classList.toggle("visible", editMode && nb > 0);
+}
+
+async function enregistrerTousLesPrix() {
+  const keys = Object.keys(pendingChanges);
+  if (keys.length === 0) return;
+
+  const saveBtn = document.getElementById("editSaveBtn");
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "⏳ Enregistrement...";
+  }
+
+  let succes = 0,
+    erreurs = 0;
+
+  for (const key of keys) {
+    const { articleId, materiauId, newValue } = pendingChanges[key];
+    const existing = prixParCell[key];
+    try {
+      if (existing !== undefined && existing !== null) {
+        const { error } = await supabaseClient
+          .from("prix_articles")
+          .update({ prix: newValue })
+          .eq("article_id", articleId)
+          .eq("materiau_id", materiauId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabaseClient.from("prix_articles").insert({
           article_id: articleId,
           materiau_id: materiauId,
           prix: newValue,
         });
-    }
-    prixParCell[key] = newValue;
-    cell.dataset.prix = newValue;
-
-    if (newValue === "-" || newValue === "X" || newValue === "") {
-      cell.className = "price cell-vide";
-    } else {
-      cell.className = "price cell-clickable";
-    }
-
-    cell.classList.add("saved-flash");
-    setTimeout(() => cell.classList.remove("saved-flash"), 600);
-  });
-  document.addEventListener("keydown", (e) => {
-    if (
-      e.target.hasAttribute &&
-      e.target.hasAttribute("data-price-cell") &&
-      editMode
-    ) {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        e.target.blur();
+        if (error) throw error;
       }
+      prixParCell[key] = newValue;
+      succes++;
+    } catch (err) {
+      console.error("Erreur sauvegarde", key, err);
+      erreurs++;
+    }
+  }
+
+  pendingChanges = {};
+  document.querySelectorAll(".cell-modified").forEach((c) => {
+    c.classList.remove("cell-modified");
+    c.classList.add("saved-flash");
+    setTimeout(() => c.classList.remove("saved-flash"), 600);
+  });
+
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "💾 Enregistrer tout";
+  }
+  mettreAJourBarreActions();
+
+  if (erreurs === 0)
+    afficherToast(`✅ ${succes} prix enregistré(s)`, "success");
+  else afficherToast(`⚠️ ${succes} ok, ${erreurs} erreur(s)`, "error", 5000);
+}
+
+function annulerTousLesPrix(silencieux = false) {
+  const keys = Object.keys(pendingChanges);
+  if (keys.length === 0) return;
+  if (!silencieux && !confirm(`Annuler les ${keys.length} modification(s) ?`))
+    return;
+
+  document.querySelectorAll("[data-price-cell]").forEach((cell) => {
+    const key = `${cell.dataset.articleId}:${cell.dataset.materiauId}`;
+    const change = pendingChanges[key];
+    if (change) {
+      cell.textContent = change.oldValue;
+      cell.dataset.prix = change.oldValue;
+      cell.classList.remove("cell-modified");
     }
   });
+
+  pendingChanges = {};
+  mettreAJourBarreActions();
+  if (!silencieux) afficherToast("↩️ Modifications annulées", "info");
 }
 
 // =========================================================
@@ -798,7 +957,6 @@ function renderAdmin() {
     body.className = "stock-categorie-body hidden";
     body.style.padding = "1rem";
 
-    // Boutons d'action
     const toolbar = document.createElement("div");
     toolbar.style.cssText =
       "display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);";
@@ -810,7 +968,6 @@ function renderAdmin() {
     toolbar.innerHTML = toolbarHtml;
     body.appendChild(toolbar);
 
-    // Matériaux
     if (isMulti && materiaux.length > 0) {
       const matTitle = document.createElement("div");
       matTitle.style.cssText =
@@ -834,7 +991,6 @@ function renderAdmin() {
       });
     }
 
-    // Articles + stocks
     if (articles.length > 0) {
       const artTitle = document.createElement("div");
       artTitle.style.cssText =
@@ -914,7 +1070,6 @@ function renderAdmin() {
     container.appendChild(catDiv);
   });
 
-  // Écouteurs
   container.querySelectorAll("[data-action]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -934,7 +1089,6 @@ function renderAdmin() {
     });
   });
 
-  // Sauvegarde auto des stocks
   container.querySelectorAll(".stock-input").forEach((input) => {
     input.addEventListener("blur", async (e) => {
       const articleId = parseInt(e.target.dataset.article);
@@ -1124,7 +1278,6 @@ function ouvrirModalAddArt(cat, titre) {
   _modalTitre = titre;
   document.getElementById("modalAddArtCat").textContent = titre;
   document.getElementById("addArtNom").value = "";
-  document.getElementById("addArtPrix").value = "";
   document.getElementById("addArtStock").value = "0";
 
   const select = document.getElementById("addArtPosition");
@@ -1143,16 +1296,33 @@ function ouvrirModalAddArt(cat, titre) {
     select.appendChild(opt);
   });
 
-  // Remplir le select des matériaux
-  const matSelect = document.getElementById("addArtMateriau");
-  matSelect.innerHTML = '<option value="">— Aucun —</option>';
+  const catInfo = CATEGORIES.find((c) => c.key === cat);
+  const isMulti = catInfo && catInfo.type === "multi";
   const materiaux = materiauxParCat[cat] || [];
-  materiaux.forEach((m) => {
-    const opt = document.createElement("option");
-    opt.value = m.id;
-    opt.textContent = m.nom;
-    matSelect.appendChild(opt);
-  });
+
+  const zoneSimple = document.getElementById("addArtPrixSimple");
+  const zoneMulti = document.getElementById("addArtPrixMulti");
+  const grid = document.getElementById("addArtPrixGrid");
+
+  if (isMulti && materiaux.length > 0) {
+    zoneSimple.classList.add("hidden");
+    zoneMulti.classList.remove("hidden");
+    grid.innerHTML = "";
+
+    materiaux.forEach((m) => {
+      const item = document.createElement("div");
+      item.className = "prix-grid-item";
+      item.innerHTML = `
+        <label>${m.nom}</label>
+        <input type="text" class="addArtPrixInput" data-materiau="${m.id}" placeholder="-">
+      `;
+      grid.appendChild(item);
+    });
+  } else {
+    zoneSimple.classList.remove("hidden");
+    zoneMulti.classList.add("hidden");
+    document.getElementById("addArtPrix").value = "";
+  }
 
   document.getElementById("modalAddArt").classList.remove("hidden");
   setTimeout(() => document.getElementById("addArtNom").focus(), 100);
@@ -1224,8 +1394,6 @@ function setupFormsAdmin() {
     formArt.addEventListener("submit", async (e) => {
       e.preventDefault();
       const nom = document.getElementById("addArtNom").value.trim();
-      const materiauId = document.getElementById("addArtMateriau").value;
-      const prix = document.getElementById("addArtPrix").value.trim();
       const stockInit =
         parseInt(document.getElementById("addArtStock").value) || 0;
       if (!nom) return;
@@ -1255,23 +1423,57 @@ function setupFormsAdmin() {
         return;
       }
 
-      // Si un matériau est sélectionné et un prix fourni → créer le prix
-      if (materiauId && prix) {
-        await supabaseClient.from("prix_articles").insert({
-          article_id: newArticle.id,
-          materiau_id: parseInt(materiauId),
-          prix: prix,
+      const catInfo = CATEGORIES.find((c) => c.key === _modalCat);
+      const isMulti = catInfo && catInfo.type === "multi";
+      const materiaux = materiauxParCat[_modalCat] || [];
+
+      let premierMateriauAvecPrix = null;
+
+      if (isMulti && materiaux.length > 0) {
+        const inputs = document.querySelectorAll(
+          "#addArtPrixGrid .addArtPrixInput",
+        );
+        const prixInserts = [];
+        inputs.forEach((inp) => {
+          const val = inp.value.trim();
+          if (!val) return;
+          const mid = parseInt(inp.dataset.materiau);
+          prixInserts.push({
+            article_id: newArticle.id,
+            materiau_id: mid,
+            prix: val,
+          });
+          if (premierMateriauAvecPrix === null) premierMateriauAvecPrix = mid;
         });
+
+        if (prixInserts.length > 0) {
+          const { error: errPrix } = await supabaseClient
+            .from("prix_articles")
+            .insert(prixInserts);
+          if (errPrix) {
+            afficherToast("Erreur prix : " + errPrix.message, "error");
+          }
+        }
+      } else {
+        const prix = document.getElementById("addArtPrix").value.trim();
+        const materiauId = materiaux[0]?.id;
+        if (materiauId && prix) {
+          await supabaseClient.from("prix_articles").insert({
+            article_id: newArticle.id,
+            materiau_id: materiauId,
+            prix: prix,
+          });
+          premierMateriauAvecPrix = materiauId;
+        }
       }
 
-      // Si un matériau est sélectionné et un stock initial fourni → créer le stock
-      if (materiauId && stockInit > 0) {
+      if (stockInit > 0 && premierMateriauAvecPrix !== null) {
         await supabaseClient.from("stock").upsert(
           {
-            categorie: "",
+            categorie: _modalCat,
             item_index: newArticle.id,
-            champ: String(materiauId),
-            item_nom: "",
+            champ: String(premierMateriauAvecPrix),
+            item_nom: nom,
             quantite: stockInit,
             seuil_alerte: 5,
             updated_at: new Date().toISOString(),
@@ -1308,7 +1510,6 @@ function setupFormsAdmin() {
         return;
       }
 
-      // Si catégorie simple, créer un matériau "Prix" par défaut
       if (type === "simple") {
         await supabaseClient
           .from("materiaux")
@@ -1362,10 +1563,11 @@ function setupPanier() {
 }
 
 function extrairePrix(prixTexte) {
-  if (typeof prixTexte === "number") return prixTexte;
+  if (typeof prixTexte === "number") return Math.round(prixTexte);
   if (typeof prixTexte === "string") {
-    const m = prixTexte.match(/\d+/);
-    return m ? parseInt(m[0], 10) : 0;
+    const clean = prixTexte.replace(",", ".");
+    const m = clean.match(/\d+(\.\d+)?/);
+    return m ? Math.round(parseFloat(m[0])) : 0;
   }
   return 0;
 }
@@ -1727,62 +1929,359 @@ async function chargerComptabilite() {
   const container = document.getElementById("comptabiliteContent");
   if (!container) return;
   const estPatron = utilisateurCourant?.role === "patron";
+
   container.innerHTML = `
-        ${
-          estPatron
-            ? `<div style="text-align:center;margin-bottom:1.5rem;display:flex;gap:0.5rem;justify-content:center;flex-wrap:wrap;">
+    ${
+      estPatron
+        ? `<div style="text-align:center;margin-bottom:1.5rem;display:flex;gap:0.5rem;justify-content:center;flex-wrap:wrap;">
             <button id="exportCsvBtn" class="btn-toolbar">📥 Export CSV</button>
             <button id="annulerVenteBtn" class="btn-toolbar">↩️ Annuler dernière</button>
             <button id="resetComptaBtn" class="btn-toolbar btn-danger">🗑️ Réinitialiser</button>
         </div>`
-            : ""
-        }
-        <div id="comptaData">Chargement...</div>`;
-  const dataContainer = document.getElementById("comptaData");
+        : ""
+    }
+    <div class="compta-filter" id="comptaFilter">
+      <button data-periode="today">Aujourd'hui</button>
+      <button data-periode="7d">7 jours</button>
+      <button data-periode="30d">30 jours</button>
+      <button data-periode="all" class="active">Tout</button>
+    </div>
+    <div id="comptaData">Chargement...</div>
+  `;
+
   const { data: sales } = await supabaseClient
     .from("sales")
     .select("*")
     .order("created_at", { ascending: false });
-  window._comptaSales = sales || [];
-  if (!sales || !sales.length) {
-    dataContainer.innerHTML = '<div class="no-data">Aucune vente.</div>';
-    return;
-  }
-  const parEmploye = {};
-  sales.forEach((s) => {
-    const nom = s.employee_nom || "?";
-    if (!parEmploye[nom]) parEmploye[nom] = { ventes: 0, total: 0 };
-    parEmploye[nom].ventes++;
-    parEmploye[nom].total += Number(s.total);
+
+  _comptaCache = sales || [];
+
+  document.querySelectorAll("#comptaFilter button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      comptaFilter = btn.dataset.periode;
+      document
+        .querySelectorAll("#comptaFilter button")
+        .forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      renderComptaData();
+    });
   });
-  const totalGeneral = sales.reduce((sum, s) => sum + Number(s.total), 0);
-  dataContainer.innerHTML = `
-        <div class="compta-section"><h3>Par employé</h3>
-        <table class="compta-table"><thead><tr><th>Employé</th><th>Ventes</th><th>Total</th></tr></thead><tbody>
-        ${Object.entries(parEmploye)
-          .sort((a, b) => b[1].total - a[1].total)
-          .map(
-            ([n, s]) =>
-              `<tr><td><strong>${n}</strong></td><td>${s.ventes}</td><td style="color:var(--accent);font-weight:700;">${s.total} S</td></tr>`,
-          )
-          .join("")}
-        </tbody></table>
-        <div class="compta-total"><span>TOTAL</span><span>${totalGeneral} Septims</span></div></div>
-        <div class="compta-section"><h3>Historique</h3>
-        <table class="compta-table"><thead><tr><th>Date</th><th>Employé</th><th>Articles</th><th>Total</th></tr></thead><tbody>
-        ${sales
-          .slice(0, 100)
-          .map((s) => {
-            const date = new Date(s.created_at).toLocaleString("fr-FR");
-            const items = (s.items || [])
-              .map((i) => `${i.qte}× ${i.nom}`)
-              .join(", ");
-            return `<tr><td style="font-size:0.8rem;">${date}</td><td><strong>${s.employee_nom}</strong></td><td style="font-size:0.8rem;color:var(--text-muted);">${items}</td><td style="color:var(--accent);font-weight:700;">${s.total} S</td></tr>`;
-          })
-          .join("")}
-        </tbody></table></div>`;
+
+  renderComptaData();
 }
 
+function filtrerParPeriode(sales, periode) {
+  if (periode === "all") return sales;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let debut;
+  if (periode === "today") debut = today;
+  else if (periode === "7d") {
+    debut = new Date(today);
+    debut.setDate(debut.getDate() - 7);
+  } else if (periode === "30d") {
+    debut = new Date(today);
+    debut.setDate(debut.getDate() - 30);
+  }
+  return sales.filter((s) => new Date(s.created_at) >= debut);
+}
+
+function getVentesPeriodePrecedente(sales, periode) {
+  if (periode === "all") return [];
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let debutPrec, finPrec;
+
+  if (periode === "today") {
+    finPrec = today;
+    debutPrec = new Date(today);
+    debutPrec.setDate(debutPrec.getDate() - 1);
+  } else if (periode === "7d") {
+    finPrec = new Date(today);
+    finPrec.setDate(finPrec.getDate() - 7);
+    debutPrec = new Date(finPrec);
+    debutPrec.setDate(debutPrec.getDate() - 7);
+  } else if (periode === "30d") {
+    finPrec = new Date(today);
+    finPrec.setDate(finPrec.getDate() - 30);
+    debutPrec = new Date(finPrec);
+    debutPrec.setDate(debutPrec.getDate() - 30);
+  } else {
+    return [];
+  }
+
+  return sales.filter((s) => {
+    const d = new Date(s.created_at);
+    return d >= debutPrec && d < finPrec;
+  });
+}
+
+function renderComptaData() {
+  const dataContainer = document.getElementById("comptaData");
+  if (!dataContainer) return;
+
+  const ventesFiltrees = filtrerParPeriode(_comptaCache, comptaFilter);
+  window._comptaSales = ventesFiltrees;
+
+  if (!ventesFiltrees.length) {
+    dataContainer.innerHTML =
+      '<div class="no-data">Aucune vente sur cette période.</div>';
+    return;
+  }
+
+  const caTotal = ventesFiltrees.reduce((s, v) => s + Number(v.total), 0);
+  const nbVentes = ventesFiltrees.length;
+  const panierMoyen = Math.round(caTotal / nbVentes);
+
+  const ventesPrecedentes = getVentesPeriodePrecedente(
+    _comptaCache,
+    comptaFilter,
+  );
+  const caPrecedent = ventesPrecedentes.reduce(
+    (s, v) => s + Number(v.total),
+    0,
+  );
+
+  let evolution = 0;
+  let badgeClass = "neutral";
+  let badgeText = "—";
+
+  if (caPrecedent > 0) {
+    evolution = Math.round(((caTotal - caPrecedent) / caPrecedent) * 100);
+    badgeClass = evolution > 0 ? "up" : evolution < 0 ? "down" : "neutral";
+    badgeText = `${evolution > 0 ? "+" : ""}${evolution}%`;
+  } else if (caTotal > 0 && comptaFilter !== "all") {
+    badgeClass = "up";
+    badgeText = "Nouveau";
+  }
+
+  const parJour = {};
+  ventesFiltrees.forEach((s) => {
+    const d = new Date(s.created_at);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (!parJour[key]) parJour[key] = { ca: 0, ventes: 0, date: d };
+    parJour[key].ca += Number(s.total);
+    parJour[key].ventes++;
+  });
+  const joursTries = Object.values(parJour)
+    .sort((a, b) => b.date - a.date)
+    .slice(0, 14);
+  const maxCA = Math.max(...joursTries.map((j) => j.ca), 1);
+
+  const topArticles = {};
+  ventesFiltrees.forEach((s) => {
+    (s.items || []).forEach((item) => {
+      const key = item.nom;
+      if (!topArticles[key]) topArticles[key] = { qte: 0, ca: 0 };
+      topArticles[key].qte += item.qte || 1;
+      topArticles[key].ca += (item.prix || 0) * (item.qte || 1);
+    });
+  });
+  const topArticlesArray = Object.entries(topArticles)
+    .map(([nom, d]) => ({ nom, ...d }))
+    .sort((a, b) => b.ca - a.ca)
+    .slice(0, 8);
+
+  const parEmploye = {};
+  ventesFiltrees.forEach((s) => {
+    const nom = s.employee_nom || "?";
+    if (!parEmploye[nom]) parEmploye[nom] = { ventes: [], ca: 0 };
+    parEmploye[nom].ventes.push(s);
+    parEmploye[nom].ca += Number(s.total);
+  });
+  const employesTries = Object.entries(parEmploye).sort(
+    (a, b) => b[1].ca - a[1].ca,
+  );
+
+  let html = "";
+
+  html += `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-card-title">💰 Chiffre d'affaires</div>
+        <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: var(--accent); line-height: 1;">
+          ${caTotal.toLocaleString("fr-FR")} S
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+          ${
+            comptaFilter === "all"
+              ? `${ventesFiltrees.length} vente(s) au total`
+              : `vs ${caPrecedent.toLocaleString("fr-FR")} S période préc.`
+          }
+          <span class="stat-badge ${badgeClass}">${badgeText}</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-title">🧾 Nombre de ventes</div>
+        <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: var(--accent); line-height: 1;">
+          ${nbVentes}
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+          transactions enregistrées
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-title">🎯 Panier moyen</div>
+        <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: var(--accent); line-height: 1;">
+          ${panierMoyen.toLocaleString("fr-FR")} S
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+          par transaction
+        </div>
+      </div>
+    </div>
+  `;
+
+  html += `
+    <div class="compta-section">
+      <h3>📅 Ventes par jour <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">(14 derniers jours)</span></h3>
+      <div style="background-color: var(--bg-header); border-radius: 8px; overflow: hidden;">
+        <div class="compta-header-row">
+          <span>Date</span>
+          <span>Volume</span>
+          <span>Ventes</span>
+          <span>Total</span>
+        </div>
+        ${joursTries
+          .map((j) => {
+            const pourcentage = (j.ca / maxCA) * 100;
+            const jour = j.date.toLocaleDateString("fr-FR", {
+              day: "2-digit",
+              month: "2-digit",
+            });
+            const annee = j.date.getFullYear();
+            return `
+              <div class="jour-row">
+                <div class="jour-date">${jour}<small>${annee}</small></div>
+                <div class="jour-bar-container"><div class="jour-bar" style="width: ${pourcentage}%"></div></div>
+                <div class="jour-ventes">${j.ventes}</div>
+                <div class="jour-total">${j.ca.toLocaleString("fr-FR")} S</div>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+  `;
+
+  html += `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-card-title">🏆 Top articles (par CA)</div>
+        ${
+          topArticlesArray.length
+            ? topArticlesArray
+                .map(
+                  (a, i) => `
+              <div class="stat-ligne">
+                <span class="stat-ligne-nom">${i + 1}. ${a.nom}</span>
+                <span class="stat-ligne-valeur">${a.ca.toLocaleString("fr-FR")} S <small style="color: var(--text-muted); font-weight: 400;">×${a.qte}</small></span>
+              </div>
+            `,
+                )
+                .join("")
+            : '<div class="no-data" style="padding: 1rem;">Aucune vente</div>'
+        }
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-title">👥 Répartition par employé</div>
+        ${employesTries
+          .map(
+            ([nom, d]) => `
+          <div class="stat-ligne">
+            <span class="stat-ligne-nom">${nom}</span>
+            <span class="stat-ligne-valeur">${d.ca.toLocaleString("fr-FR")} S <small style="color: var(--text-muted); font-weight: 400;">(${d.ventes.length})</small></span>
+          </div>
+        `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+
+  html += `
+    <div class="compta-section">
+      <h3>👥 Détail par employé</h3>
+      <table class="compta-table">
+        <thead>
+          <tr><th>Employé</th><th>Ventes</th><th>Total</th></tr>
+        </thead>
+        <tbody>
+          ${employesTries
+            .map(([nom, d], idx) => {
+              const detailsHtml = d.ventes
+                .slice(0, 20)
+                .map((s) => {
+                  const date = new Date(s.created_at).toLocaleString("fr-FR");
+                  const items = (s.items || [])
+                    .map((i) => `${i.qte}× ${i.nom}`)
+                    .join(", ");
+                  return `<tr><td style="font-size:0.75rem;">${date}</td><td style="font-size:0.8rem;">${items}</td><td style="color:var(--accent);font-weight:700;white-space:nowrap;">${s.total} S</td></tr>`;
+                })
+                .join("");
+              return `
+                <tr class="compta-employe-row" data-employe-idx="${idx}">
+                  <td><span class="employe-expand-icon">▶</span> <strong>${nom}</strong></td>
+                  <td>${d.ventes.length}</td>
+                  <td style="color:var(--accent);font-weight:700;">${d.ca.toLocaleString("fr-FR")} S</td>
+                </tr>
+                <tr class="employe-detail-row hidden" data-detail-idx="${idx}">
+                  <td colspan="3">
+                    <div class="employe-detail">
+                      <table class="employe-detail-table">
+                        <thead><tr><th>Date</th><th>Articles</th><th>Total</th></tr></thead>
+                        <tbody>${detailsHtml || '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:1rem;">Aucune vente</td></tr>'}</tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  html += `
+    <div class="compta-section">
+      <h3>📜 Historique <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">(${Math.min(ventesFiltrees.length, 100)} dernières)</span></h3>
+      <table class="compta-table">
+        <thead><tr><th>Date</th><th>Employé</th><th>Articles</th><th>Total</th></tr></thead>
+        <tbody>
+          ${ventesFiltrees
+            .slice(0, 100)
+            .map((s) => {
+              const date = new Date(s.created_at).toLocaleString("fr-FR");
+              const items = (s.items || [])
+                .map((i) => `${i.qte}× ${i.nom}`)
+                .join(", ");
+              return `<tr><td style="font-size:0.8rem;white-space:nowrap;">${date}</td><td><strong>${s.employee_nom}</strong></td><td style="font-size:0.8rem;color:var(--text-muted);">${items}</td><td style="color:var(--accent);font-weight:700;white-space:nowrap;">${s.total} S</td></tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  dataContainer.innerHTML = html;
+
+  document.querySelectorAll(".compta-employe-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      const idx = row.dataset.employeIdx;
+      const detailRow = document.querySelector(`[data-detail-idx="${idx}"]`);
+      if (!detailRow) return;
+      const isHidden = detailRow.classList.contains("hidden");
+      detailRow.classList.toggle("hidden");
+      const icon = row.querySelector(".employe-expand-icon");
+      if (icon) icon.textContent = isHidden ? "▼" : "▶";
+    });
+  });
+}
+
+// =========================================================
+// TABLEAU DE BORD
+// =========================================================
 async function chargerDashboard() {
   const container = document.getElementById("dashboardContent");
   if (!container) return;
@@ -1791,18 +2290,250 @@ async function chargerDashboard() {
     return;
   }
   container.innerHTML = "Chargement...";
+
   const { data: sales } = await supabaseClient
     .from("sales")
     .select("*")
     .order("created_at", { ascending: false });
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const ventesDuJour = (sales || []).filter(
-    (s) => new Date(s.created_at) >= today,
+
+  const toutesVentes = sales || [];
+
+  const now = new Date();
+  const debutJour = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const debutHier = new Date(debutJour);
+  debutHier.setDate(debutHier.getDate() - 1);
+  const finHier = new Date(debutJour);
+
+  const ventesJour = toutesVentes.filter(
+    (s) => new Date(s.created_at) >= debutJour,
   );
-  const caDuJour = ventesDuJour.reduce((sum, s) => sum + Number(s.total), 0);
-  container.innerHTML = `<div class="dash-top"><div class="dash-card highlight"><span class="dash-card-label">💰 CA du jour</span>
-        <span class="dash-card-value">${caDuJour} S</span><span class="dash-card-sub">${ventesDuJour.length} ventes</span></div></div>`;
+  const ventesHier = toutesVentes.filter((s) => {
+    const d = new Date(s.created_at);
+    return d >= debutHier && d < finHier;
+  });
+
+  const caJour = ventesJour.reduce((sum, s) => sum + Number(s.total), 0);
+  const caHier = ventesHier.reduce((sum, s) => sum + Number(s.total), 0);
+  const nbVentesJour = ventesJour.length;
+  const panierMoyen = nbVentesJour > 0 ? Math.round(caJour / nbVentesJour) : 0;
+
+  let evolBadge = "";
+  if (caHier > 0) {
+    const evol = Math.round(((caJour - caHier) / caHier) * 100);
+    const cls = evol > 0 ? "up" : evol < 0 ? "down" : "neutral";
+    const signe = evol > 0 ? "+" : "";
+    evolBadge = `<span class="stat-badge ${cls}">${signe}${evol}%</span>`;
+  } else if (caJour > 0) {
+    evolBadge = `<span class="stat-badge up">Nouveau</span>`;
+  }
+
+  const topArticles = {};
+  ventesJour.forEach((s) => {
+    (s.items || []).forEach((item) => {
+      const key = item.nom;
+      if (!topArticles[key]) topArticles[key] = { qte: 0, ca: 0 };
+      topArticles[key].qte += item.qte || 1;
+      topArticles[key].ca += (item.prix || 0) * (item.qte || 1);
+    });
+  });
+  const topArray = Object.entries(topArticles)
+    .map(([nom, d]) => ({ nom, ...d }))
+    .sort((a, b) => b.ca - a.ca)
+    .slice(0, 5);
+
+  const alertes = [];
+  Object.entries(stockData).forEach(([key, st]) => {
+    if (st.quantite > st.seuil) return;
+    const [articleId, materiauId] = key.split(":").map(Number);
+    let nomArticle = "?";
+    let nomMateriau = "";
+    for (const cat of CATEGORIES) {
+      const arts = articlesParCat[cat.key] || [];
+      const art = arts.find((a) => a.id === articleId);
+      if (art) {
+        nomArticle = art.nom;
+        const mats = materiauxParCat[cat.key] || [];
+        const mat = mats.find((m) => m.id === materiauId);
+        if (mat) nomMateriau = mat.nom;
+        break;
+      }
+    }
+    alertes.push({
+      nom: nomArticle,
+      materiau: nomMateriau,
+      quantite: st.quantite,
+      seuil: st.seuil,
+    });
+  });
+  alertes.sort((a, b) => a.quantite - b.quantite);
+  const alertesAffichees = alertes.slice(0, 8);
+
+  const parEmploye = {};
+  ventesJour.forEach((s) => {
+    const nom = s.employee_nom || "?";
+    if (!parEmploye[nom]) parEmploye[nom] = { ventes: 0, ca: 0 };
+    parEmploye[nom].ventes++;
+    parEmploye[nom].ca += Number(s.total);
+  });
+  const employesTries = Object.entries(parEmploye).sort(
+    (a, b) => b[1].ca - a[1].ca,
+  );
+
+  const dernieresVentes = ventesJour.slice(0, 8);
+
+  let html = "";
+
+  html += `
+    <div class="dash-top">
+      <div class="dash-card highlight">
+        <span class="dash-card-label">💰 CA du jour</span>
+        <span class="dash-card-value">${caJour.toLocaleString("fr-FR")} S</span>
+        <span class="dash-card-sub">${nbVentesJour} vente(s) ${evolBadge}</span>
+      </div>
+      <div class="dash-card">
+        <span class="dash-card-label">🧾 Ventes</span>
+        <span class="dash-card-value">${nbVentesJour}</span>
+        <span class="dash-card-sub">transactions aujourd'hui</span>
+      </div>
+      <div class="dash-card">
+        <span class="dash-card-label">🎯 Panier moyen</span>
+        <span class="dash-card-value">${panierMoyen.toLocaleString("fr-FR")} S</span>
+        <span class="dash-card-sub">par transaction</span>
+      </div>
+      <div class="dash-card">
+        <span class="dash-card-label">📅 CA d'hier</span>
+        <span class="dash-card-value">${caHier.toLocaleString("fr-FR")} S</span>
+        <span class="dash-card-sub">${ventesHier.length} vente(s)</span>
+      </div>
+    </div>
+  `;
+
+  html += `<div class="dash-grid">`;
+
+  html += `
+    <div class="dash-section">
+      <h3>🏆 Top articles du jour</h3>
+      ${
+        topArray.length
+          ? topArray
+              .map((a, i) => {
+                const rangClass =
+                  i === 0
+                    ? "gold"
+                    : i === 1
+                      ? "silver"
+                      : i === 2
+                        ? "bronze"
+                        : "";
+                return `
+                <div class="dash-liste-item">
+                  <span class="dash-item-rang ${rangClass}">${i + 1}</span>
+                  <span class="dash-item-nom">${a.nom}</span>
+                  <span class="dash-item-val">${a.ca.toLocaleString("fr-FR")} S <small style="color:var(--text-muted);font-weight:400;">×${a.qte}</small></span>
+                </div>
+              `;
+              })
+              .join("")
+          : '<div class="dash-empty">Aucune vente aujourd\'hui</div>'
+      }
+    </div>
+  `;
+
+  html += `
+    <div class="dash-section">
+      <h3>⚠️ Alertes stock ${
+        alertes.length > 0
+          ? `<span style="font-size:0.8rem;color:var(--text-muted);font-weight:400;">(${alertes.length})</span>`
+          : ""
+      }</h3>
+      ${
+        alertesAffichees.length
+          ? alertesAffichees
+              .map((a) => {
+                const estRupture = a.quantite <= 0;
+                const cls = estRupture ? "" : "orange";
+                const badge = estRupture ? "Rupture" : "Stock bas";
+                const label = a.materiau ? `${a.nom} (${a.materiau})` : a.nom;
+                return `
+                <div class="dash-alerte ${cls}">
+                  <span class="dash-alerte-nom">${label}</span>
+                  <span class="dash-alerte-qte">${badge} · ${a.quantite}</span>
+                </div>
+              `;
+              })
+              .join("")
+          : '<div class="dash-empty">✅ Aucune alerte, tout va bien !</div>'
+      }
+    </div>
+  `;
+
+  html += `
+    <div class="dash-section">
+      <h3>👥 Employés du jour</h3>
+      ${
+        employesTries.length
+          ? employesTries
+              .map(([nom, d], i) => {
+                const rangClass =
+                  i === 0
+                    ? "gold"
+                    : i === 1
+                      ? "silver"
+                      : i === 2
+                        ? "bronze"
+                        : "";
+                return `
+                <div class="dash-liste-item">
+                  <span class="dash-item-rang ${rangClass}">${i + 1}</span>
+                  <span class="dash-item-nom">${nom}</span>
+                  <span class="dash-item-val">${d.ca.toLocaleString("fr-FR")} S <small style="color:var(--text-muted);font-weight:400;">(${d.ventes})</small></span>
+                </div>
+              `;
+              })
+              .join("")
+          : '<div class="dash-empty">Aucune vente aujourd\'hui</div>'
+      }
+    </div>
+  `;
+
+  html += `
+    <div class="dash-section">
+      <h3>🕐 Dernières ventes</h3>
+      ${
+        dernieresVentes.length
+          ? dernieresVentes
+              .map((s) => {
+                const heure = new Date(s.created_at).toLocaleTimeString(
+                  "fr-FR",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  },
+                );
+                const nbArticles = (s.items || []).reduce(
+                  (sum, i) => sum + (i.qte || 1),
+                  0,
+                );
+                const detail = `${nbArticles} article${nbArticles > 1 ? "s" : ""}`;
+                return `
+                <div class="dash-vente-item">
+                  <div class="dash-vente-info">
+                    <span class="dash-vente-emp">${s.employee_nom}</span>
+                    <span class="dash-vente-detail">${heure} · ${detail}</span>
+                  </div>
+                  <span class="dash-vente-total">${s.total} S</span>
+                </div>
+              `;
+              })
+              .join("")
+          : '<div class="dash-empty">Aucune vente aujourd\'hui</div>'
+      }
+    </div>
+  `;
+
+  html += `</div>`;
+
+  container.innerHTML = html;
 }
 
 // =========================================================

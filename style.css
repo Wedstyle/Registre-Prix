@@ -2343,3 +2343,150 @@ body.edit-mode .row-clickable {
   background-color: #ef4444;
   color: #fff;
 }
+/* =========================================================
+   BARRE D'ACTIONS FLOTTANTE (mode édition)
+   ========================================================= */
+.edit-actions-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(120%);
+  background-color: var(--bg-surface);
+  border: 2px solid var(--accent);
+  border-radius: 9999px;
+  padding: 0.6rem 1rem 0.6rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  z-index: 1500;
+  transition:
+    transform 0.3s ease,
+    opacity 0.3s ease;
+  opacity: 0;
+  pointer-events: none;
+}
+.edit-actions-bar.visible {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.edit-actions-info {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.edit-actions-info strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+.edit-actions-bar .btn-save {
+  background-color: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.edit-actions-bar .btn-save:hover {
+  background-color: var(--accent-hover);
+}
+
+/* Cellule modifiée non enregistrée */
+body.edit-mode .cell-modified {
+  background-color: rgba(245, 158, 11, 0.2) !important;
+  outline: 2px solid var(--accent) !important;
+  outline-offset: -2px !important;
+  position: relative;
+}
+body.edit-mode .cell-modified::before {
+  content: "●";
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 0.7rem;
+  color: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .edit-actions-bar {
+    flex-direction: column;
+    border-radius: 12px;
+    padding: 0.75rem;
+    width: calc(100% - 32px);
+    max-width: 400px;
+    gap: 0.4rem;
+  }
+}
+/* =========================================================
+   MODAL MULTI-PRIX
+   ========================================================= */
+.prix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.prix-grid-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prix-grid-item label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prix-grid-item input {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  color: var(--text-main);
+  background-color: var(--bg-header);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.prix-grid-item input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+.prix-grid-item input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+#view-admin::before,
+#view-admin::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 800px;
+  background-image: url("rug.png");
+  background-size: 100% 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#view-admin::before {
+  left: 0;
+}
+#view-admin::after {
+  right: 0;
+}
+
+#view-admin > .page-container {
+  position: relative;
+  z-index: 1;
+}
