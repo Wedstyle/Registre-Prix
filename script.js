@@ -1932,39 +1932,12 @@ async function chargerRachats() {
 
   statsContainer.innerHTML = `
     <div class="stat-card">
-      <div class="stat-card-title">💰 CA ventes (total)</div>
-      <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: var(--accent); line-height: 1;">
-        ${formatSeptims(caVentes)} S
-      </div>
-      <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
-        ${toutesVentes.length} vente(s) enregistrée(s)
-      </div>
-    </div>
-    <div class="stat-card">
       <div class="stat-card-title">🛒 Total des rachats</div>
       <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: #ef4444; line-height: 1;">
         -${formatSeptims(totalRachats)} S
       </div>
       <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
         ${_rachatsCache.length} rachat(s) effectué(s)
-      </div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-card-title">🎯 Bénéfice net</div>
-      <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: ${benefice >= 0 ? "#22c55e" : "#ef4444"}; line-height: 1;">
-        ${benefice >= 0 ? "+" : ""}${formatSeptims(benefice)} S
-      </div>
-      <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
-        CA − rachats (global)
-      </div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-card-title">📅 Aujourd'hui</div>
-      <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: ${beneficeJour >= 0 ? "#22c55e" : "#ef4444"}; line-height: 1;">
-        ${beneficeJour >= 0 ? "+" : ""}${formatSeptims(beneficeJour)} S
-      </div>
-      <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
-        CA : ${formatSeptims(caJour)} S · Rachats : ${formatSeptims(rachatsJour)} S
       </div>
     </div>
   `;
