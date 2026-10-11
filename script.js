@@ -37,9 +37,10 @@ let pendingChanges = {};
 
 let comptaFilter = "all";
 let _comptaCache = [];
+let _rachatsCache = [];
 
 // =========================================================
-// HELPERS NUMÉRIQUES (décimales)
+// HELPERS
 // =========================================================
 function arrondir2(n) {
   return Math.round(n * 100) / 100;
@@ -50,6 +51,16 @@ function formatSeptims(n) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 0,
   });
+}
+
+function escapeHtml(s) {
+  return String(s || "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
 }
 
 function afficherToast(message, type = "info", duree = 3000) {
@@ -90,6 +101,7 @@ function afficherVue(nomVue) {
     renderAdmin();
   }
   if (nomVue === "dashboard") chargerDashboard();
+  if (nomVue === "rachats") chargerRachats();
   window.scrollTo(0, 0);
 }
 
@@ -152,6 +164,8 @@ async function initAuth() {
   if (bcat) bcat.addEventListener("click", ouvrirModalAddCat);
   const vv = document.getElementById("validerVente");
   if (vv) vv.addEventListener("click", validerVente);
+  const br = document.getElementById("btnValiderRachat");
+  if (br) br.addEventListener("click", validerRachat);
   const ri = document.getElementById("remiseInput");
   if (ri)
     ri.addEventListener("input", (e) => {
@@ -205,6 +219,7 @@ function mettreAJourUIUtilisateur(user) {
   const catalogueBtn = document.querySelector(
     '.nav-btn[data-view="catalogue"]',
   );
+  const rachatBtn = document.querySelector('.nav-btn[data-view="rachats"]');
   const panierAside = document.querySelector(".cart-col");
 
   if (!user) {
@@ -214,6 +229,7 @@ function mettreAJourUIUtilisateur(user) {
     if (adminBtn) adminBtn.style.display = "none";
     if (dashboardBtn) dashboardBtn.style.display = "none";
     if (catalogueBtn) catalogueBtn.style.display = "inline-flex";
+    if (rachatBtn) rachatBtn.style.display = "none";
     if (panierAside) panierAside.style.display = "none";
     const et = document.getElementById("editToggle");
     if (et) et.style.display = "none";
@@ -225,7 +241,8 @@ function mettreAJourUIUtilisateur(user) {
       !cv ||
       cv.id === "view-attente" ||
       cv.id === "view-admin" ||
-      cv.id === "view-dashboard"
+      cv.id === "view-dashboard" ||
+      cv.id === "view-rachats"
     )
       afficherVue("catalogue");
     return;
@@ -234,6 +251,7 @@ function mettreAJourUIUtilisateur(user) {
   const estPatron = user.role === "patron";
   navLoginBtn.style.display = "none";
   if (catalogueBtn) catalogueBtn.style.display = "inline-flex";
+  if (rachatBtn) rachatBtn.style.display = estValide ? "inline-flex" : "none";
   navUserInfo.style.display = "flex";
   navUserInfo.innerHTML = `
         <span>Connecté : <strong>${user.pseudo}</strong></span>
@@ -550,6 +568,15 @@ function ecouterChangementsTempsReel() {
           if (panel && !panel.classList.contains("hidden"))
             chargerComptabilite();
         }
+      },
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "rachats" },
+      () => {
+        const cv = document.querySelector(".view.active");
+        if (cv && cv.id === "view-rachats") chargerRachats();
+        if (cv && cv.id === "view-dashboard") chargerDashboard();
       },
     )
     .on(
@@ -1105,7 +1132,6 @@ function renderAdmin() {
     });
   });
 
-  // 🆕 Suppression d'un matériau pour UN article spécifique
   container.querySelectorAll(".btn-del-mat-art").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -1122,21 +1148,18 @@ function renderAdmin() {
       )
         return;
 
-      // Supprimer le prix
       await supabaseClient
         .from("prix_articles")
         .delete()
         .eq("article_id", articleId)
         .eq("materiau_id", materiauId);
 
-      // Supprimer le stock
       await supabaseClient
         .from("stock")
         .delete()
         .eq("item_index", articleId)
         .eq("champ", String(materiauId));
 
-      // Mettre à jour le cache local
       delete prixParCell[`${articleId}:${materiauId}`];
       delete stockData[`${articleId}:${materiauId}`];
 
@@ -1282,7 +1305,6 @@ async function executerActionDirecte(type, action, id, nom) {
     if (!confirm(msg)) return;
     if (!confirm("Confirmer ?")) return;
 
-    // Si c'est un article, nettoyer aussi le stock (orphelin sinon)
     if (type === "art") {
       const materiauxDeLaCat = materiauxParCat[cat] || [];
       for (const m of materiauxDeLaCat) {
@@ -1836,6 +1858,246 @@ async function validerVente() {
   mettreAJourPanierUI();
   await chargerTout();
   renderAllSections();
+}
+
+// =========================================================
+// RACHATS
+// =========================================================
+async function chargerRachats() {
+  const container = document.getElementById("rachatsListe");
+  const statsContainer = document.getElementById("rachatsStats");
+  if (!container || !statsContainer) return;
+
+  const selCat = document.getElementById("rachatCategorie");
+  if (selCat && selCat.options.length <= 1) {
+    CATEGORIES.forEach((c) => {
+      const opt = document.createElement("option");
+      opt.value = c.key;
+      opt.textContent = c.titre;
+      selCat.appendChild(opt);
+    });
+  }
+
+  const datalist = document.getElementById("rachatSuggestions");
+  if (datalist) {
+    datalist.innerHTML = "";
+    Object.values(articlesParCat).forEach((arr) => {
+      arr.forEach((a) => {
+        const opt = document.createElement("option");
+        opt.value = a.nom;
+        datalist.appendChild(opt);
+      });
+    });
+  }
+
+  const [resRachats, resSales] = await Promise.all([
+    supabaseClient
+      .from("rachats")
+      .select("*")
+      .order("created_at", { ascending: false }),
+    supabaseClient
+      .from("sales")
+      .select("total, created_at")
+      .order("created_at", { ascending: false }),
+  ]);
+
+  _rachatsCache = resRachats.data || [];
+  const toutesVentes = resSales.data || [];
+
+  let totalRachats = 0;
+  _rachatsCache.forEach((r) => {
+    totalRachats = arrondir2(totalRachats + Number(r.prix_achat) * r.quantite);
+  });
+  let caVentes = 0;
+  toutesVentes.forEach((s) => {
+    caVentes = arrondir2(caVentes + Number(s.total));
+  });
+  const benefice = arrondir2(caVentes - totalRachats);
+
+  const debutJour = new Date();
+  debutJour.setHours(0, 0, 0, 0);
+  let rachatsJour = 0;
+  _rachatsCache
+    .filter((r) => new Date(r.created_at) >= debutJour)
+    .forEach((r) => {
+      rachatsJour = arrondir2(rachatsJour + Number(r.prix_achat) * r.quantite);
+    });
+  let caJour = 0;
+  toutesVentes
+    .filter((s) => new Date(s.created_at) >= debutJour)
+    .forEach((s) => {
+      caJour = arrondir2(caJour + Number(s.total));
+    });
+  const beneficeJour = arrondir2(caJour - rachatsJour);
+
+  statsContainer.innerHTML = `
+    <div class="stat-card">
+      <div class="stat-card-title">💰 CA ventes (total)</div>
+      <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: var(--accent); line-height: 1;">
+        ${formatSeptims(caVentes)} S
+      </div>
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+        ${toutesVentes.length} vente(s) enregistrée(s)
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-title">🛒 Total des rachats</div>
+      <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: #ef4444; line-height: 1;">
+        -${formatSeptims(totalRachats)} S
+      </div>
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+        ${_rachatsCache.length} rachat(s) effectué(s)
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-title">🎯 Bénéfice net</div>
+      <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: ${benefice >= 0 ? "#22c55e" : "#ef4444"}; line-height: 1;">
+        ${benefice >= 0 ? "+" : ""}${formatSeptims(benefice)} S
+      </div>
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+        CA − rachats (global)
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-title">📅 Aujourd'hui</div>
+      <div style="font-family: var(--font-title); font-size: 2rem; font-weight: 700; color: ${beneficeJour >= 0 ? "#22c55e" : "#ef4444"}; line-height: 1;">
+        ${beneficeJour >= 0 ? "+" : ""}${formatSeptims(beneficeJour)} S
+      </div>
+      <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
+        CA : ${formatSeptims(caJour)} S · Rachats : ${formatSeptims(rachatsJour)} S
+      </div>
+    </div>
+  `;
+
+  if (_rachatsCache.length === 0) {
+    container.innerHTML =
+      '<div class="no-data">Aucun rachat enregistré pour le moment.</div>';
+    return;
+  }
+
+  const estPatron = utilisateurCourant?.role === "patron";
+
+  container.innerHTML = `
+    <div class="compta-section">
+      <h3>📜 Historique des rachats <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">(${Math.min(_rachatsCache.length, 100)} derniers)</span></h3>
+      <table class="compta-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Article</th>
+            <th>Quantité</th>
+            <th>Prix unitaire</th>
+            <th>Total</th>
+            <th>Employé</th>
+            ${estPatron ? "<th></th>" : ""}
+          </tr>
+        </thead>
+        <tbody>
+          ${_rachatsCache
+            .slice(0, 100)
+            .map((r) => {
+              const date = new Date(r.created_at).toLocaleString("fr-FR");
+              const total = arrondir2(Number(r.prix_achat) * r.quantite);
+              return `<tr data-rachat-id="${r.id}">
+                <td style="font-size:0.8rem;white-space:nowrap;">${date}</td>
+                <td><strong>${escapeHtml(r.article_nom)}</strong></td>
+                <td>${r.quantite}</td>
+                <td style="color:var(--text-muted);">${formatSeptims(r.prix_achat)} S</td>
+                <td style="color:#ef4444;font-weight:700;white-space:nowrap;">-${formatSeptims(total)} S</td>
+                <td>${escapeHtml(r.employee_nom || "?")}</td>
+                ${
+                  estPatron
+                    ? `<td><button class="btn-mini btn-danger btn-del-rachat" data-id="${r.id}" title="Supprimer">🗑️</button></td>`
+                    : ""
+                }
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  container.querySelectorAll(".btn-del-rachat").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = parseInt(btn.dataset.id);
+      if (!confirm("⚠️ Supprimer ce rachat ?")) return;
+      await supabaseClient.from("rachats").delete().eq("id", id);
+      afficherToast("✅ Rachat supprimé", "success");
+      chargerRachats();
+    });
+  });
+}
+
+async function validerRachat() {
+  if (!utilisateurCourant) {
+    afficherToast("Connectez-vous.", "error");
+    return;
+  }
+  const estValide =
+    utilisateurCourant.valide === true || utilisateurCourant.role === "patron";
+  if (!estValide) {
+    afficherToast("Compte non validé.", "error");
+    return;
+  }
+
+  const nom = document.getElementById("rachatNom").value.trim();
+  const categorie = document.getElementById("rachatCategorie").value;
+  const prixRaw = document.getElementById("rachatPrix").value.trim();
+  const quantite =
+    parseInt(document.getElementById("rachatQuantite").value) || 0;
+
+  if (!nom) {
+    afficherToast("Nom de l'article requis.", "error");
+    return;
+  }
+  const prixAchat = extrairePrix(prixRaw);
+  if (prixAchat <= 0) {
+    afficherToast("Prix d'achat invalide.", "error");
+    return;
+  }
+  if (quantite <= 0) {
+    afficherToast("Quantité invalide.", "error");
+    return;
+  }
+
+  const btn = document.getElementById("btnValiderRachat");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Enregistrement...";
+  }
+
+  const { error } = await supabaseClient.from("rachats").insert({
+    article_nom: nom,
+    categorie: categorie || null,
+    prix_achat: prixAchat,
+    quantite: quantite,
+    employee_id: utilisateurCourant.id,
+    employee_nom: utilisateurCourant.pseudo,
+  });
+
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = "💾 Enregistrer le rachat";
+  }
+
+  if (error) {
+    afficherToast(error.message || "Erreur.", "error", 5000);
+    return;
+  }
+
+  afficherToast(
+    `✅ Rachat : ${formatSeptims(prixAchat * quantite)} S`,
+    "success",
+  );
+
+  document.getElementById("rachatNom").value = "";
+  document.getElementById("rachatPrix").value = "";
+  document.getElementById("rachatQuantite").value = "1";
+  document.getElementById("rachatCategorie").value = "";
+  document.getElementById("rachatNom").focus();
+
+  chargerRachats();
 }
 
 // =========================================================
@@ -2394,6 +2656,9 @@ function renderComptaData() {
   });
 }
 
+// =========================================================
+// TABLEAU DE BORD
+// =========================================================
 async function chargerDashboard() {
   const container = document.getElementById("dashboardContent");
   if (!container) return;
@@ -2408,7 +2673,13 @@ async function chargerDashboard() {
     .select("*")
     .order("created_at", { ascending: false });
 
+  const { data: rachatsAll } = await supabaseClient
+    .from("rachats")
+    .select("article_nom, prix_achat, quantite, employee_nom, created_at")
+    .order("created_at", { ascending: false });
+
   const toutesVentes = sales || [];
+  const tousRachats = rachatsAll || [];
 
   const now = new Date();
   const debutJour = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -2424,6 +2695,10 @@ async function chargerDashboard() {
     return d >= debutHier && d < finHier;
   });
 
+  const rachatsJour = tousRachats.filter(
+    (r) => new Date(r.created_at) >= debutJour,
+  );
+
   let caJour = 0;
   ventesJour.forEach((s) => {
     caJour = arrondir2(caJour + Number(s.total));
@@ -2434,6 +2709,23 @@ async function chargerDashboard() {
   });
   const nbVentesJour = ventesJour.length;
   const panierMoyen = nbVentesJour > 0 ? arrondir2(caJour / nbVentesJour) : 0;
+
+  let totalRachatsJour = 0;
+  rachatsJour.forEach((r) => {
+    totalRachatsJour = arrondir2(
+      totalRachatsJour + Number(r.prix_achat) * r.quantite,
+    );
+  });
+  let totalRachatsGlobal = 0;
+  tousRachats.forEach((r) => {
+    totalRachatsGlobal = arrondir2(
+      totalRachatsGlobal + Number(r.prix_achat) * r.quantite,
+    );
+  });
+  const nbRachatsJour = rachatsJour.length;
+  const nbRachatsGlobal = tousRachats.length;
+
+  const beneficeJour = arrondir2(caJour - totalRachatsJour);
 
   let evolBadge = "";
   if (caHier > 0) {
@@ -2500,6 +2792,7 @@ async function chargerDashboard() {
   );
 
   const dernieresVentes = ventesJour.slice(0, 8);
+  const derniersRachats = tousRachats.slice(0, 8);
 
   let html = "";
 
@@ -2521,9 +2814,11 @@ async function chargerDashboard() {
         <span class="dash-card-sub">par transaction</span>
       </div>
       <div class="dash-card">
-        <span class="dash-card-label">📅 CA d'hier</span>
-        <span class="dash-card-value">${formatSeptims(caHier)} S</span>
-        <span class="dash-card-sub">${ventesHier.length} vente(s)</span>
+        <span class="dash-card-label">📈 Bénéfice du jour</span>
+        <span class="dash-card-value" style="color: ${beneficeJour >= 0 ? "#22c55e" : "#ef4444"};">
+          ${beneficeJour >= 0 ? "+" : ""}${formatSeptims(beneficeJour)} S
+        </span>
+        <span class="dash-card-sub">CA ${formatSeptims(caJour)} S − Rachats ${formatSeptims(totalRachatsJour)} S</span>
       </div>
     </div>
   `;
@@ -2625,10 +2920,7 @@ async function chargerDashboard() {
               .map((s) => {
                 const heure = new Date(s.created_at).toLocaleTimeString(
                   "fr-FR",
-                  {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  },
+                  { hour: "2-digit", minute: "2-digit" },
                 );
                 const nbArticles = (s.items || []).reduce(
                   (sum, i) => sum + (i.qte || 1),
@@ -2656,11 +2948,96 @@ async function chargerDashboard() {
     </div>
   `;
 
+  html += `
+    <div class="dash-section">
+      <h3>🛒 Derniers rachats ${
+        nbRachatsGlobal > 0
+          ? `<span style="font-size:0.8rem;color:var(--text-muted);font-weight:400;">(${nbRachatsGlobal})</span>`
+          : ""
+      }</h3>
+      ${
+        derniersRachats.length
+          ? derniersRachats
+              .map((r) => {
+                const date = new Date(r.created_at).toLocaleString("fr-FR", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                const total = arrondir2(Number(r.prix_achat) * r.quantite);
+                return `
+                <div class="dash-vente-item">
+                  <div class="dash-vente-info">
+                    <span class="dash-vente-emp">${escapeHtml(r.article_nom)}</span>
+                    <span class="dash-vente-detail">${date} · ×${r.quantite} à ${formatSeptims(r.prix_achat)} S</span>
+                  </div>
+                  <span class="dash-vente-total" style="color: #ef4444;">-${formatSeptims(total)} S</span>
+                </div>
+              `;
+              })
+              .join("")
+          : '<div class="dash-empty">Aucun rachat enregistré.</div>'
+      }
+    </div>
+  `;
+
   html += `</div>`;
+
+  html += `
+    <div class="dash-section" style="margin-top: 1.5rem; max-width: 1200px; margin-left: auto; margin-right: auto;">
+      <h3>💰 Résumé des rachats</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+        <div class="stat-card">
+          <div class="stat-card-title">🛒 Total rachats (global)</div>
+          <div style="font-family: var(--font-title); font-size: 1.8rem; font-weight: 700; color: #ef4444; line-height: 1;">
+            -${formatSeptims(totalRachatsGlobal)} S
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 6px;">
+            ${nbRachatsGlobal} rachat(s) au total
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-title">📅 Rachats du jour</div>
+          <div style="font-family: var(--font-title); font-size: 1.8rem; font-weight: 700; color: #ef4444; line-height: 1;">
+            -${formatSeptims(totalRachatsJour)} S
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 6px;">
+            ${nbRachatsJour} rachat(s) aujourd'hui
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-title">📊 Panier moyen rachat</div>
+          <div style="font-family: var(--font-title); font-size: 1.8rem; font-weight: 700; color: var(--accent); line-height: 1;">
+            ${
+              nbRachatsGlobal > 0
+                ? formatSeptims(arrondir2(totalRachatsGlobal / nbRachatsGlobal))
+                : 0
+            } S
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 6px;">
+            par rachat (global)
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-title">🎯 Ratio bénéfice / CA</div>
+          <div style="font-family: var(--font-title); font-size: 1.8rem; font-weight: 700; color: ${beneficeJour >= 0 ? "#22c55e" : "#ef4444"}; line-height: 1;">
+            ${caJour > 0 ? Math.round((beneficeJour / caJour) * 100) : 0}%
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 6px;">
+            bénéfice du jour / CA
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 
   container.innerHTML = html;
 }
 
+// =========================================================
+// INIT
+// =========================================================
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     await chargerTout();

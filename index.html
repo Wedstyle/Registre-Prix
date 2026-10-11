@@ -9,14 +9,20 @@
       rel="stylesheet"
     />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <link rel="stylesheet" href="style.css?v=8004" />
+    <link rel="stylesheet" href="style.css?v=8005" />
   </head>
-
   <body>
     <nav class="main-nav">
       <div class="nav-brand">📜 Registre des Marchandises</div>
       <div class="nav-links">
         <button class="nav-btn" data-view="catalogue">🏪 Catalogue</button>
+        <button
+          class="nav-btn rachat-only"
+          data-view="rachats"
+          style="display: none"
+        >
+          💰 Rachats
+        </button>
         <button
           class="nav-btn dashboard-only"
           data-view="dashboard"
@@ -205,6 +211,71 @@
       </div>
     </section>
 
+    <section id="view-rachats" class="view">
+      <div class="page-container">
+        <header class="page-header">
+          <h1 class="page-title-big">💰 Rachats</h1>
+          <p class="page-subtitle">
+            Achats auprès des clients — suivi du bénéfice
+          </p>
+        </header>
+
+        <div class="rachat-form">
+          <h2>➕ Nouveau rachat</h2>
+          <div class="rachat-form-row">
+            <div class="form-group">
+              <label>Nom de l'article</label>
+              <input
+                type="text"
+                id="rachatNom"
+                placeholder="Ex: Épée en fer"
+                autocomplete="off"
+                list="rachatSuggestions"
+                required
+              />
+              <datalist id="rachatSuggestions"></datalist>
+            </div>
+            <div class="form-group">
+              <label>Catégorie (optionnel)</label>
+              <select id="rachatCategorie">
+                <option value="">— Aucune —</option>
+              </select>
+            </div>
+          </div>
+          <div class="rachat-form-row">
+            <div class="form-group">
+              <label>Prix d'achat unitaire (S)</label>
+              <input
+                type="text"
+                id="rachatPrix"
+                placeholder="Ex: 12,5"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label>Quantité</label>
+              <input
+                type="number"
+                id="rachatQuantite"
+                min="1"
+                value="1"
+                required
+              />
+            </div>
+            <div class="form-group" style="align-self: flex-end">
+              <button id="btnValiderRachat" class="btn-primary btn-full">
+                💾 Enregistrer le rachat
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="rachatsStats" class="stats-grid"></div>
+
+        <div id="rachatsListe"></div>
+      </div>
+    </section>
+
     <section id="view-dashboard" class="view">
       <div class="page-container">
         <header class="page-header">
@@ -334,7 +405,6 @@
                 <select id="addArtPosition"></select>
               </div>
 
-              <!-- Zone : catégorie SIMPLE -->
               <div id="addArtPrixSimple" class="form-group hidden">
                 <label>Prix</label>
                 <input
@@ -344,7 +414,6 @@
                 />
               </div>
 
-              <!-- Zone : catégorie MULTI-MATÉRIAUX -->
               <div id="addArtPrixMulti" class="hidden">
                 <label
                   style="
@@ -463,6 +532,6 @@
       </div>
     </section>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=8005"></script>
   </body>
 </html>
