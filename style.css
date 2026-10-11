@@ -2464,3 +2464,12 @@ body.edit-mode .cell-modified::before {
   color: var(--text-muted);
   opacity: 0.5;
 }
+.btn-del-mat-art {
+  align-self: center;
+  margin-left: 8px;
+  opacity: 0.4;
+  transition: opacity 0.2s;
+}
+.stock-item:hover .btn-del-mat-art {
+  opacity: 1;
+}

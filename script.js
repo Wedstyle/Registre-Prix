@@ -1047,16 +1047,26 @@ function renderAdmin() {
           itemDiv.className = `stock-item ${etatClass}`;
           itemDiv.dataset.nom = `${a.nom} (${m.nom})`;
           itemDiv.innerHTML = `
-                        <div class="stock-item-nom">${m.nom}${badge}</div>
-                        <div class="stock-input-group">
-                            <label class="stock-input-label">Quantité</label>
-                            <input type="number" min="0" class="stock-input" value="${st.quantite}" data-article="${a.id}" data-materiau="${m.id}" data-field="quantite">
-                        </div>
-                        <div class="stock-input-group">
-                            <label class="stock-input-label">Seuil</label>
-                            <input type="number" min="0" class="stock-input" value="${st.seuil}" data-article="${a.id}" data-materiau="${m.id}" data-field="seuil">
-                        </div>
-                    `;
+            <div class="stock-item-nom">${m.nom}${badge}</div>
+            <div class="stock-input-group">
+              <label class="stock-input-label">Quantité</label>
+              <input type="number" min="0" class="stock-input" value="${st.quantite}" data-article="${a.id}" data-materiau="${m.id}" data-field="quantite">
+            </div>
+            <div class="stock-input-group">
+              <label class="stock-input-label">Seuil</label>
+              <input type="number" min="0" class="stock-input" value="${st.seuil}" data-article="${a.id}" data-materiau="${m.id}" data-field="seuil">
+            </div>
+            <button
+              class="btn-mini btn-danger btn-del-mat-art"
+              data-article="${a.id}"
+              data-materiau="${m.id}"
+              data-nom-article="${a.nom}"
+              data-nom-materiau="${m.nom}"
+              data-cat="${key}"
+              title="Supprimer ${m.nom} pour ${a.nom}"
+              style="margin-left: 8px;"
+            >🗑️</button>
+          `;
           body.appendChild(itemDiv);
         });
       });
@@ -1092,6 +1102,48 @@ function renderAdmin() {
       if (action === "delete-cat") return supprimerCategorie(cat, catId, nom);
 
       await executerActionDirecte(type, action, id, nom);
+    });
+  });
+
+  // 🆕 Suppression d'un matériau pour UN article spécifique
+  container.querySelectorAll(".btn-del-mat-art").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const articleId = parseInt(e.currentTarget.dataset.article);
+      const materiauId = parseInt(e.currentTarget.dataset.materiau);
+      const nomArticle = e.currentTarget.dataset.nomArticle;
+      const nomMateriau = e.currentTarget.dataset.nomMateriau;
+
+      if (
+        !confirm(
+          `⚠️ Supprimer "${nomMateriau}" pour "${nomArticle}" ?\n\n` +
+            `Le prix ET le stock de cette combinaison seront supprimés.`,
+        )
+      )
+        return;
+
+      // Supprimer le prix
+      await supabaseClient
+        .from("prix_articles")
+        .delete()
+        .eq("article_id", articleId)
+        .eq("materiau_id", materiauId);
+
+      // Supprimer le stock
+      await supabaseClient
+        .from("stock")
+        .delete()
+        .eq("item_index", articleId)
+        .eq("champ", String(materiauId));
+
+      // Mettre à jour le cache local
+      delete prixParCell[`${articleId}:${materiauId}`];
+      delete stockData[`${articleId}:${materiauId}`];
+
+      afficherToast(`✅ ${nomMateriau} retiré de ${nomArticle}`, "success");
+      await chargerTout();
+      renderAllSections();
+      renderAdmin();
     });
   });
 
@@ -1229,6 +1281,19 @@ async function executerActionDirecte(type, action, id, nom) {
         : `⚠️ Supprimer l'article "${nom}" ?\n\nTous ses prix et stocks seront supprimés.`;
     if (!confirm(msg)) return;
     if (!confirm("Confirmer ?")) return;
+
+    // Si c'est un article, nettoyer aussi le stock (orphelin sinon)
+    if (type === "art") {
+      const materiauxDeLaCat = materiauxParCat[cat] || [];
+      for (const m of materiauxDeLaCat) {
+        await supabaseClient
+          .from("stock")
+          .delete()
+          .eq("item_index", idNum)
+          .eq("champ", String(m.id));
+      }
+    }
+
     const { error } = await supabaseClient.from(table).delete().eq("id", idNum);
     if (error) {
       afficherToast("Erreur : " + error.message, "error");
